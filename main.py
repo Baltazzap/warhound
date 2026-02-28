@@ -4,7 +4,7 @@ from discord.ui import Button, View, Modal, TextInput
 from discord.ext import commands
 
 # --- НАСТРОЙКИ (ЗАПОЛНИ СВОИМИ ДАННЫМИ) ---
-TOKEN = 'MTQ3NzMzMzUwNzg0Mjc3MzEyNA.G6ytmN.5GHCyTO1lQNUqrwWSI1VZMZaEAXkEFn9DvQ4i0'
+TOKEN = 'MTQ3NzMzMzUwNzg0Mjc3MzEyNA.GchC0l.g8L2od-D-ZsToudeeVYk6Bi9kOnGf_OzBRANlk'
 
 # ID Каналов (Правый клик по каналу -> Копировать ID)
 WELCOME_CHANNEL_ID = 1477296089882427493  # Канал для приветствий
@@ -114,4 +114,5 @@ async def on_ready():
 if TOKEN:
     bot.run(TOKEN)
 else:
+
     print("ОШИБКА: Токен не найден! Создай файл .env и добавь DISCORD_TOKEN=твой_токен")
