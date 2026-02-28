@@ -3,6 +3,9 @@ from discord import app_commands
 from discord.ui import Button, View, Modal, TextInput
 from discord.ext import commands
 
+# --- НАСТРОЙКИ (ЗАПОЛНИ СВОИМИ ДАННЫМИ) ---
+TOKEN = ''.strip()  # Убирает пробелы
+
 # ID Каналов (Правый клик по каналу -> Копировать ID)
 WELCOME_CHANNEL_ID = 1477296089882427493  # Канал для приветствий
 APPLY_CHANNEL_ID = 1477340577254211808    # Канал, куда приходят заявки
