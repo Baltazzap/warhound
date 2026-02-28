@@ -1,7 +1,10 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
-from dotenv import load_dotenv
+from discord.ui import Button, View, Modal, TextInput  # ← ЭТОГО НЕ ХВАТАЛО!
+import asyncio
 import os
+from dotenv import load_dotenv
 
 # Загружаем переменные из .env
 load_dotenv()
