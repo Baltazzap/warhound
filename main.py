@@ -4,7 +4,7 @@ from discord.ui import Button, View, Modal, TextInput
 from discord.ext import commands
 
 # --- НАСТРОЙКИ (ЗАПОЛНИ СВОИМИ ДАННЫМИ) ---
-TOKEN = 'MTQ3NzMzMzUwNzg0Mjc3MzEyNA.GzPx8W.w-gbFI82oS5Z2ykmg9WVIrxBK_iQ81KlSHLb_c'
+TOKEN = 'MTQ3NzMzMzUwNzg0Mjc3MzEyNA.G6ytmN.5GHCyTO1lQNUqrwWSI1VZMZaEAXkEFn9DvQ4i0'
 
 # ID Каналов (Правый клик по каналу -> Копировать ID)
 WELCOME_CHANNEL_ID = 1477296089882427493  # Канал для приветствий
