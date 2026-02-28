@@ -80,7 +80,7 @@ async def verify(interaction: discord.Interaction):
 class ApplicationModal(Modal, title="Заявка в компанию"):
     # Поля формы
     nickname = TextInput(label="Ваш никнейм в Discord", placeholder="Например: Driver_007")
-    age = TextInput(label="Ваш возраст", placeholder="18+")
+    age = TextInput(label="Ваш возраст", placeholder="16+")
     experience = TextInput(label="Опыт работы / Стаж", style=discord.TextStyle.long, placeholder="Расскажите о своем опыте вождения...")
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -118,5 +118,12 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 @bot.event
 async def on_ready():
     print(f'✅ Бот запущен как {bot.user}')
-
+    
+    # Синхронизация slash команд
+    try:
+        synced = await bot.tree.sync()
+        print(f'✅ Синхронизировано {len(synced)} команд')
+    except Exception as e:
+        print(f'❌ Ошибка синхронизации: {e}')
+        
 bot.run(TOKEN)
