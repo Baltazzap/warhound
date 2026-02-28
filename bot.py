@@ -3,9 +3,6 @@ from discord import app_commands
 from discord.ui import Button, View, Modal, TextInput
 from discord.ext import commands
 
-# --- НАСТРОЙКИ (ЗАПОЛНИ СВОИМИ ДАННЫМИ) ---
-TOKEN = 'MTQ3NzMzMzUwNzg0Mjc3MzEyNA.GEJKWR.IZvSO18EJLDNfavCm7-F1oo1ztsWHV5EPdNR-U'.strip()  # Убирает пробелы
-
 # ID Каналов (Правый клик по каналу -> Копировать ID)
 WELCOME_CHANNEL_ID = 1477296089882427493  # Канал для приветствий
 APPLY_CHANNEL_ID = 1477340577254211808    # Канал, куда приходят заявки
@@ -15,7 +12,6 @@ VOICE_CATEGORY_ID = 1477361244729114646           # ID категории для
 # ID Ролей (Правый клик по роли -> Копировать ID)
 NEWBIE_ROLE_ID = 1477340663342301326      # Роль "Новичок" (выдается при входе)
 VERIFIED_ROLE_ID = 1477003764576817296    # Роль "Верифицирован" (выдается после проверки)
-VERIFIED_ROLE_ID = 1477340898625847338    # Роль "Верифицирован" (выдается после проверки)
 
 # Включаем все необходимые намерения (Intents)
 intents = discord.Intents.all()
