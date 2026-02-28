@@ -6,6 +6,16 @@ import asyncio
 import os
 from dotenv import load_dotenv
 
+class PersistentViewBot(commands.Bot):
+    def __init__(self):
+        super().__init__(command_prefix='!', intents=discord.Intents.all())
+    async def setup_hook(self):
+        await bot.tree.sync(guild=discord.Object(id=guild_id))
+
+guild_id = 1359905691367641180
+
+bot = PersistentViewBot()
+
 # Загружаем переменные из .env
 load_dotenv()
 
@@ -117,14 +127,11 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 @bot.event
 async def on_ready():
-    print(f'✅ Бот запущен как {bot.user}')
-    
-    # Синхронизация slash команд
+    print(f'Бот запущен как {bot.user}')
     try:
-        synced = await bot.tree.sync()
-        print(f'✅ Синхронизировано {len(synced)} команд')
+        synced = await tree.sync()
+        print(f"Синхронизировано {len(synced)} команд.")
     except Exception as e:
-        print(f'❌ Ошибка синхронизации: {e}')
+        print(f"Ошибка синхронизации: {e}")
         
 bot.run(TOKEN)
-
