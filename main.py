@@ -22,7 +22,7 @@ tree = bot.tree
 # --- НАСТРОЙКИ (ВАШИ ID) ---
 WELCOME_CHANNEL_ID = 1477296089882427493
 NEWBIE_ROLE_ID = 1477340663342301326
-VERIFIED_ROLE_ID = 1477003764576817296
+VERIFIED_ROLE_ID = 1477340898625847338
 VOICE_TEMPLATE_CHANNEL_ID = 1477361557792100363
 VOICE_CATEGORY_ID = 1477361244729114646
 
@@ -462,3 +462,4 @@ if __name__ == "__main__":
         print("❌ Неверный токен! Проверьте токен в файле .env")
     except Exception as e:
         print(f"❌ Ошибка запуска: {e}")
+
