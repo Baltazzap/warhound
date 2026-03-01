@@ -138,7 +138,7 @@ def add_xp(user_id, amount):
 
 
 # ============================================
-# 🖼️ ГЕНЕРАЦИЯ КАРТОЧКИ УРОВНЯ
+# 🖼️ ГЕНЕРАЦИЯ КАРТОЧКИ УРОВНЯ (ИСПРАВЛЕННАЯ)
 # ============================================
 async def create_level_card(user: discord.Member, level_data: dict):
     """Создать карточку уровня с аватаркой и баннером"""
@@ -146,9 +146,16 @@ async def create_level_card(user: discord.Member, level_data: dict):
     # Размеры
     width, height = 900, 300
     
-    # Создаём изображение
-    img = Image.new('RGB', (width, height), color=(20, 20, 30))
+    # Создаём изображение с градиентным фоном
+    img = Image.new('RGB', (width, height), color=(20, 20, 35))
     draw = ImageDraw.Draw(img)
+    
+    # Градиентный фон
+    for i in range(height):
+        r = int(30 + (i / height) * 20)
+        g = int(30 + (i / height) * 15)
+        b = int(50 + (i / height) * 30)
+        draw.rectangle([0, i, width, i+1], fill=(r, g, b))
     
     # Загружаем аватарку
     try:
@@ -165,69 +172,110 @@ async def create_level_card(user: discord.Member, level_data: dict):
         draw_mask.ellipse([0, 0, 200, 200], fill=255)
         avatar.putalpha(mask)
         
-        # Размещаем аватарку
+        # Размещаем аватарку с тенью
+        shadow = Image.new('RGBA', (210, 210), (0, 0, 0, 128))
+        shadow_mask = Image.new('L', (210, 210), 0)
+        ImageDraw.Draw(shadow_mask).ellipse([0, 0, 210, 210], fill=128)
+        shadow.putalpha(shadow_mask)
+        img.paste(shadow, (45, 55), shadow)
         img.paste(avatar, (50, 50), avatar)
     except Exception as e:
         print(f"Ошибка загрузки аватарки: {e}")
-        # Запасной вариант - просто квадрат
-        draw.rectangle([50, 50, 250, 250], fill=(100, 100, 100))
+        draw.ellipse([50, 50, 250, 250], fill=(100, 100, 100))
     
-    # Баннер (градиент)
-    for i in range(width):
-        r = int(30 + (i / width) * 20)
-        g = int(30 + (i / width) * 20)
-        b = int(50 + (i / width) * 30)
-        draw.rectangle([i, 0, i+1, height], fill=(r, g, b))
+    # === ПОИСК ШРИФТОВ С ПОДДЕРЖКОЙ КИРИЛЛИЦЫ ===
+    font_paths = [
+        "arial.ttf",                    # Windows
+        "C:/Windows/Fonts/arial.ttf",  # Windows полный путь
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Linux
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",  # Arch Linux
+        "/System/Library/Fonts/Helvetica.ttc",  # macOS
+        "fonts/NotoSans-Regular.ttf",   # Noto Sans
+        "DejaVuSans.ttf",               # DejaVu
+    ]
     
-    # Текст - Имя пользователя
-    try:
-        font_large = ImageFont.truetype("arial.ttf", 48)
-        font_medium = ImageFont.truetype("arial.ttf", 32)
-        font_small = ImageFont.truetype("arial.ttf", 24)
-    except:
-        font_large = ImageFont.load_default()
-        font_medium = ImageFont.load_default()
-        font_small = ImageFont.load_default()
+    # Пробуем загрузить шрифты
+    font_large = None
+    font_medium = None
+    font_small = None
     
-    # Никнейм
-    draw.text((280, 70), user.display_name[:20], fill=(255, 255, 255), font=font_large)
+    for font_path in font_paths:
+        try:
+            font_large = ImageFont.truetype(font_path, 48)
+            font_medium = ImageFont.truetype(font_path, 32)
+            font_small = ImageFont.truetype(font_path, 24)
+            break
+        except:
+            continue
     
-    # Уровень
+    # Если не нашли - используем дефолтный (но кириллица не будет работать)
+    if font_large is None:
+        try:
+            font_large = ImageFont.load_default()
+            font_medium = ImageFont.load_default()
+            font_small = ImageFont.load_default()
+            print("⚠️ Шрифт с кириллицей не найден! Установите Arial или DejaVu Sans")
+        except:
+            # Создаём простой шрифт
+            font_large = ImageFont.truetype("arial.ttf", 48) if os.name == 'nt' else ImageFont.load_default()
+            font_medium = font_large
+            font_small = font_large
+    
+    # Данные пользователя
     level = level_data.get("level", 1)
-    draw.text((280, 130), f"Уровень {level}", fill=(255, 215, 0), font=font_medium)
-    
-    # Статистика
     messages = level_data.get("messages", 0)
     voice_mins = level_data.get("voice_minutes", 0)
+    total_xp = level_data.get("xp", 0)
+    
     hours = voice_mins // 60
     mins = voice_mins % 60
     
-    draw.text((280, 180), f"💬 Сообщений: {messages:,}", fill=(200, 200, 200), font=font_small)
-    draw.text((280, 215), f"🎤 В голосе: {hours}ч {mins}м", fill=(200, 200, 200), font=font_small)
-    
-    # Прогресс бар
-    total_xp = level_data.get("xp", 0)
+    # Прогресс
     lvl, progress, required, percentage = get_xp_progress(total_xp)
     
-    # Фон прогресс бара
-    draw.rounded_rectangle([280, 250, 850, 275], radius=12, fill=(50, 50, 60))
+    # === РИСОВАНИЕ ТЕКСТА ===
+    # Никнейм (белый, жирный)
+    draw.text((280, 60), user.display_name[:25], fill=(255, 255, 255), font=font_large)
     
-    # Заполнение прогресс бара
-    if required > 0:
-        fill_width = int(570 * (progress / required))
-        # Градиент для прогресс бара
+    # Уровень (золотой)
+    level_text = f"Уровень {level}" if level < MAX_LEVEL else "МАКСИМАЛЬНЫЙ УРОВЕНЬ"
+    draw.text((280, 120), level_text, fill=(255, 215, 0), font=font_medium)
+    
+    # Статистика (светло-серый)
+    stats_y = 170
+    draw.text((280, stats_y), f"💬 Сообщений: {messages:,}", fill=(220, 220, 220), font=font_small)
+    draw.text((280, stats_y + 35), f"🎤 В голосе: {hours}ч {mins}м", fill=(220, 220, 220), font=font_small)
+    draw.text((280, stats_y + 70), f"⭐ Всего XP: {total_xp:,}", fill=(220, 220, 220), font=font_small)
+    
+    # Прогресс бар
+    bar_x, bar_y, bar_w, bar_h = 280, 255, 570, 25
+    
+    # Фон прогресс бара
+    draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], radius=12, fill=(40, 40, 55))
+    
+    # Заполнение (градиент)
+    if required > 0 and lvl < MAX_LEVEL:
+        fill_width = int(bar_w * (progress / required))
         for i in range(fill_width):
-            r = int(100 + (i / fill_width) * 155) if fill_width > 0 else 100
-            g = int(100 + (i / fill_width) * 155) if fill_width > 0 else 100
-            b = int(200 + (i / fill_width) * 55) if fill_width > 0 else 200
-            draw.rectangle([280 + i, 250, 281 + i, 275], fill=(r, g, b))
+            # Градиент от фиолетового к голубому
+            r = int(138 + (i / fill_width) * 43) if fill_width > 0 else 138
+            g = int(43 + (i / fill_width) * 146) if fill_width > 0 else 43
+            b = int(226 + (i / fill_width) * 29) if fill_width > 0 else 226
+            draw.rectangle([bar_x + i, bar_y + 2, bar_x + i + 1, bar_y + bar_h - 2], fill=(r, g, b))
     
     # Текст прогресса
-    progress_text = f"{progress:,} / {required:,} XP ({percentage}%)"
-    draw.text((850, 255), progress_text, fill=(255, 255, 255), font=font_small, anchor="rm")
+    if lvl < MAX_LEVEL:
+        progress_text = f"{progress:,} / {required:,} XP ({percentage}%)"
+    else:
+        progress_text = "МАКСИМУМ"
     
-    # Рамка
-    draw.rectangle([0, 0, width-1, height-1], outline=(100, 100, 120), width=3)
+    draw.text((bar_x + bar_w + 10, bar_y + 6), progress_text, fill=(255, 255, 255), font=font_small)
+    
+    # Рамка вокруг карточки
+    draw.rectangle([0, 0, width-1, height-1], outline=(80, 80, 100), width=3)
+    
+    # Логотип/ватермарка
+    draw.text((width - 150, height - 25), "Warhound Logistics", fill=(100, 100, 120), font=font_small)
     
     # Сохраняем в буфер
     buffer = io.BytesIO()
@@ -1076,3 +1124,4 @@ if __name__ == "__main__":
         print("❌ Неверный токен!")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
+
