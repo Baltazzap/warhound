@@ -19,13 +19,12 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 tree = bot.tree
 
-# --- НАСТРОЙКИ (ЗАМЕНИТЕ НА СВОИ ID) ---
-WELCOME_CHANNEL_ID = 123456789012345678
-APPLY_CHANNEL_ID = 123456789012345678
-NEWBIE_ROLE_ID = 123456789012345678
-VERIFIED_ROLE_ID = 123456789012345678
-VOICE_TEMPLATE_CHANNEL_ID = 123456789012345678
-VOICE_CATEGORY_ID = 123456789012345678
+# --- НАСТРОЙКИ (ВАШИ ID) ---
+WELCOME_CHANNEL_ID = 1477296089882427493
+NEWBIE_ROLE_ID = 1477340663342301326
+VERIFIED_ROLE_ID = 1477003764576817296
+VOICE_TEMPLATE_CHANNEL_ID = 1477361557792100363
+VOICE_CATEGORY_ID = 1477361244729114646
 
 # Словарь для хранения созданных голосовых каналов
 user_channels = {}
@@ -55,21 +54,38 @@ async def on_member_join(member):
             await member.add_roles(newbie_role)
             
             embed = discord.Embed(
-                title="🚗 Добро пожаловать в Транспортную Компанию!",
-                description=f"Привет, {member.mention}!\n\nМы рады видеть тебя в нашем автопарке! 🎉",
-                color=discord.Color.blue(),
+                title="🐺 Добро пожаловать в Warhound Logistics!",
+                description=f"Привет, новый член стаи! ⚡ {member.mention}\n\n"
+                           "Ты вступаешь в компанию дальнобойщиков, где скорость, дисциплина и мощь — закон. "
+                           "Здесь каждый рейс — испытание, а каждая миля — заслуга.",
+                color=discord.Color.dark_gray(),
                 timestamp=discord.utils.utcnow()
             )
             embed.add_field(
-                name="📋 Что делать дальше?",
-                value="1. Пройди верификацию: `/verify`\n"
-                      "2. Ознакомься с правилами\n"
-                      "3. Подавай заявку: `/apply`\n"
-                      "4. Создай голосовой канал для колонны",
+                name="📋 Прежде чем выйти на трассу, ознакомься с:",
+                value="📜 **Правила компании:** #📢┃анонсы-компании / #📝┃приказы-стаи\n"
+                      "❓ **FAQ для новичков:** #🆘┃помощь-на-дороге\n"
+                      "🖤 **Ролями и позывными:** Alpha, Wolf Lead, Pack Member — выбери свой статус правильно",
                 inline=False
             )
+            embed.add_field(
+                name="🚛 Советы новичкам:",
+                value="• Используй свой позывной в никнейме: `[Позывной] | [Имя]`\n"
+                      "• Следи за рейсами в 🛣️┃расписание-рейсов\n"
+                      "• В случае ЧП или поломки сразу пиши в ⚠️┃чп-и-задержки\n"
+                      "• Подключайся к стае и общайся в 🐺┃общий-зал",
+                inline=False
+            )
+            embed.add_field(
+                name="✅ Первые шаги:",
+                value="1. Пройди верификацию: `/verify` (подтверди, что ты не робот 🤖)\n"
+                      "2. Подавай заявку в нашу VTC: https://hub.truckyapp.com/vtc/warhound-logistics/apply\n"
+                      "3. Дождись одобрения менеджеров по найму\n"
+                      "4. Получи роль водителя и выходи на трассу! 🛣️",
+                inline=False
+            )
+            embed.set_footer(text="🔥 Слоган компании: «Беги со стаей» — чувствуй мощь, будь частью стаи и не сдавайся на дороге!")
             embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
-            embed.set_footer(text=f"ID: {member.id}")
             
             await welcome_channel.send(embed=embed)
         except Exception as e:
@@ -80,7 +96,7 @@ async def on_member_join(member):
 class VerifyButton(Button):
     def __init__(self):
         super().__init__(
-            label="✅ Подтвердить личность",
+            label="✅ Я не робот",
             style=discord.ButtonStyle.green,
             custom_id="verify_button"
         )
@@ -94,7 +110,8 @@ class VerifyButton(Button):
             try:
                 await user.add_roles(role)
                 await interaction.response.send_message(
-                    f"{user.mention}, вы успешно прошли верификацию! 🎉",
+                    f"{user.mention}, вы успешно прошли верификацию! 🐺⚡\n"
+                    f"Теперь подавайте заявку в VTC: https://hub.truckyapp.com/vtc/warhound-logistics/apply",
                     ephemeral=True
                 )
             except Exception as e:
@@ -103,74 +120,26 @@ class VerifyButton(Button):
             await interaction.response.send_message("❌ Роль верификации не найдена!", ephemeral=True)
 
 
-@tree.command(name="verify", description="🔐 Пройти верификацию новичка")
+@tree.command(name="verify", description="🔐 Пройти верификацию (подтвердить, что вы не робот)")
 async def verify(interaction: discord.Interaction):
     view = View()
     view.add_item(VerifyButton())
     
     embed = discord.Embed(
-        title="🔐 Система Верификации",
-        description="Нажмите на кнопку ниже, чтобы подтвердить, что вы реальный человек.",
+        title="🔐 Верификация участника",
+        description="Нажмите на кнопку ниже, чтобы подтвердить, что вы реальный человек, а не бот.\n\n"
+                    "После верификации вам откроется доступ к каналам сервера и вы сможете подать заявку в нашу VTC.",
         color=discord.Color.green()
+    )
+    embed.add_field(
+        name="🐺 Почему это важно?",
+        value="• Защита сервера от спама и рейдов\n"
+              "• Подтверждение серьёзности ваших намерений\n"
+              "• Доступ к закрытым каналам компании",
+        inline=False
     )
     
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-
-# --- ЗАЯВКА ---
-class ApplicationModal(Modal, title="📝 Заявка в компанию"):
-    nickname = TextInput(
-        label="Ваш никнейм в Discord",
-        placeholder="Например: Driver_007",
-        max_length=50
-    )
-    age = TextInput(
-        label="Ваш возраст",
-        placeholder="18+",
-        max_length=10
-    )
-    experience = TextInput(
-        label="Опыт работы / Стаж",
-        style=discord.TextStyle.long,
-        placeholder="Расскажите о своем опыте вождения",
-        max_length=1000
-    )
-
-    async def on_submit(self, interaction: discord.Interaction):
-        guild = interaction.guild
-        channel = guild.get_channel(APPLY_CHANNEL_ID)
-        
-        if channel:
-            embed = discord.Embed(
-                title="📥 Новая заявка на работу",
-                description=f"Пользователь {interaction.user.mention} подал заявку!",
-                color=discord.Color.gold(),
-                timestamp=discord.utils.utcnow()
-            )
-            embed.add_field(name="👤 Пользователь", value=f"{interaction.user.mention}", inline=False)
-            embed.add_field(name="🆔 Никнейм", value=self.nickname.value, inline=True)
-            embed.add_field(name="🎂 Возраст", value=self.age.value, inline=True)
-            embed.add_field(name="💼 Опыт работы", value=self.experience.value, inline=False)
-            embed.set_footer(text=f"ID: {interaction.user.id}")
-            
-            try:
-                await channel.send(embed=embed)
-                await interaction.response.send_message(
-                    "✅ Ваша заявка успешно отправлена руководству!",
-                    ephemeral=True
-                )
-            except Exception as e:
-                await interaction.response.send_message(f"❌ Ошибка отправки: {e}", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ Канал для заявок не найден!", ephemeral=True)
-
-    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
-        await interaction.response.send_message("❌ Произошла ошибка при отправке заявки.", ephemeral=True)
-
-
-@tree.command(name="apply", description="📝 Подать заявку на работу водителем")
-async def apply(interaction: discord.Interaction):
-    await interaction.response.send_modal(ApplicationModal())
 
 
 # --- ГОЛОСОВЫЕ КАНАЛЫ ---
@@ -470,8 +439,7 @@ async def help_command(ctx):
     embed = discord.Embed(
         title="📚 Список команд",
         description="**Slash команды:**\n"
-                    "`/verify` - Пройти верификацию\n"
-                    "`/apply` - Подать заявку\n"
+                    "`/verify` - Пройти верификацию (подтвердить, что не робот)\n"
                     "`/say` - Отправить embed (админ)\n"
                     "`/ping` - Проверка бота\n\n"
                     "**Команды префикса:**\n"
