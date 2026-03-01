@@ -41,6 +41,7 @@ TICKETS_FILE = "tickets.json"
 CONTESTS_FILE = "contests.json"
 LEVELS_FILE = "levels.json"
 VOICE_ACTIVITY_FILE = "voice_activity.json"
+STATUSES_FILE = "statuses.json"  # Новый файл для статусов
 
 # --- НАСТРОЙКИ УРОВНЕЙ ---
 MAX_LEVEL = 150
@@ -76,11 +77,11 @@ def load_levels():
 def save_levels(data):
     save_json(LEVELS_FILE, data)
 
-def load_voice_activity():
-    return load_json(VOICE_ACTIVITY_FILE)
+def load_statuses():
+    return load_json(STATUSES_FILE)
 
-def save_voice_activity(data):
-    save_json(VOICE_ACTIVITY_FILE, data)
+def save_statuses(data):
+    save_json(STATUSES_FILE, data)
 
 def get_xp_for_level(level):
     return int(level ** 2 * 100)
@@ -126,7 +127,73 @@ def add_xp(user_id, amount):
 
 
 # ============================================
-# 🎖️ КОМАНДЫ УРОВНЕЙ (EMBED)
+# 💬 СТАТУСЫ ПОЛЬЗОВАТЕЛЕЙ
+# ============================================
+class StatusModal(Modal, title="✏️ Установить статус"):
+    status_input = TextInput(
+        label="Ваш статус",
+        placeholder="Например: В рейсе | Москва → СПб",
+        max_length=100,
+        required=False,
+        default=""
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        statuses = load_statuses()
+        user_id = str(interaction.user.id)
+        
+        if self.status_input.value.strip():
+            statuses[user_id] = {
+                "text": self.status_input.value.strip(),
+                "updated_at": datetime.now().isoformat()
+            }
+            save_statuses(statuses)
+            await interaction.response.send_message(f"✅ Статус установлен: **{self.status_input.value}**", ephemeral=True)
+        else:
+            if user_id in statuses:
+                del statuses[user_id]
+                save_statuses(statuses)
+            await interaction.response.send_message("✅ Статус удалён!", ephemeral=True)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        await interaction.response.send_message(f"❌ Ошибка: {error}", ephemeral=True)
+
+
+@tree.command(name="status", description="💬 Установить или посмотреть статус")
+@app_commands.describe(status_text="Текст статуса (оставьте пустым для удаления)")
+async def status(interaction: discord.Interaction, status_text: str = None):
+    if status_text is not None:
+        # Установить статус
+        statuses = load_statuses()
+        user_id = str(interaction.user.id)
+        
+        if status_text.strip():
+            statuses[user_id] = {
+                "text": status_text.strip(),
+                "updated_at": datetime.now().isoformat()
+            }
+            save_statuses(statuses)
+            await interaction.response.send_message(f"✅ Статус установлен: **{status_text}**", ephemeral=True)
+        else:
+            if user_id in statuses:
+                del statuses[user_id]
+                save_statuses(statuses)
+            await interaction.response.send_message("✅ Статус удалён!", ephemeral=True)
+    else:
+        # Посмотреть статус
+        await interaction.response.send_modal(StatusModal())
+
+
+def get_user_status(user_id: str) -> str:
+    """Получить статус пользователя"""
+    statuses = load_statuses()
+    if user_id in statuses:
+        return statuses[user_id].get("text", "")
+    return ""
+
+
+# ============================================
+# 🎖️ КОМАНДЫ УРОВНЕЙ (ОБНОВЛЁННЫЙ EMBED)
 # ============================================
 @tree.command(name="level", description="🎖️ Показать свой уровень")
 @app_commands.describe(member="Участник для просмотра (по умолчанию - вы)")
@@ -147,8 +214,6 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
     hours = voice_mins // 60
     mins = voice_mins % 60
     
-    lvl, progress, required, percentage = get_xp_progress(total_xp)
-    
     # Цвет embed по уровню
     if level >= 100:
         color = discord.Color.gold()
@@ -160,58 +225,67 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
         color = discord.Color.blue()
         level_emoji = "🔹"
     
+    # Получаем статус пользователя
+    user_status = get_user_status(user_id)
+    
+    # Создаём embed
     embed = discord.Embed(
         title=f"🎖️ Профиль: {target.display_name}",
-        description=f"**{level_emoji} Твой Уровень — {level}** {'| МАКСИМАЛЬНЫЙ УРОВЕНЬ!' if level >= MAX_LEVEL else ''}",
         color=color,
         timestamp=discord.utils.utcnow()
     )
     
-    # Аватарка
-    embed.set_thumbnail(url=target.avatar.url if target.avatar else target.default_avatar.url)
+    # Мини аватарка (thumbnail)
+    avatar_url = target.avatar.url if target.avatar else target.default_avatar.url
+    embed.set_thumbnail(url=avatar_url)
     
-    # Статистика
+    # Описание с уровнем
+    embed.description = f"**{level_emoji} Уровень {level}** {'| МАКСИМАЛЬНЫЙ УРОВЕНЬ!' if level >= MAX_LEVEL else ''}"
+    
+    # Статус (между профилем и уровнем)
+    if user_status:
+        embed.add_field(
+            name="💬 Статус",
+            value=f"```{user_status}```",
+            inline=False
+        )
+    
+    # Статистика - ГОЛОС И СООБЩЕНИЯ РЯДОМ (inline)
     embed.add_field(
-        name="📊 Статистика профиля:",
-        value=f"💬 **Сообщений** ```{messages:,}```\n"
-              f"🎤 **Голосовой Актив** ```{hours}час. {mins}мин.```\n"
-              f"⭐ **Всего XP** ```{total_xp:,}```",
+        name="🎤 В голосе",
+        value=f"```fix\n{hours}ч {mins}м```",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="💬 Сообщений",
+        value=f"```fix\n{messages:,}```",
+        inline=True
+    )
+    
+    # Всего XP - снизу отдельно
+    embed.add_field(
+        name="⭐ Всего заработано XP",
+        value=f"```json\n{total_xp:,}```",
         inline=False
     )
     
-    # Прогресс бар
-    if level < MAX_LEVEL:
-        bar_length = 25
-        filled = int(bar_length * (progress / required))
-        empty = bar_length - filled
-        progress_bar = "▓" * filled + "░" * empty
-        
-        embed.add_field(
-            name="📈 Прогресс",
-            value=f"```[{progress_bar}] {percentage}%```\n"
-                  f"**{progress:,}** / **{required:,} XP**",
-            inline=False
-        )
-    else:
-        embed.add_field(
-            name="📈 Прогресс",
-            value=f"```[{'▓' * 10}] 100%```\n"
-                  f"**🏆 МАКСИМАЛЬНЫЙ УРОВЕНЬ**",
-            inline=False
-        )
-    
-    # Ранг
+    # Ранг в сервере
     all_levels = load_levels()
     sorted_levels = sorted(all_levels.items(), key=lambda x: x[1].get("level", 1), reverse=True)
     user_rank = next((i + 1 for i, (uid, _) in enumerate(sorted_levels) if uid == user_id), len(sorted_levels) + 1)
     
     embed.add_field(
         name="🏆 Место в топе",
-        value=f"**#{user_rank}** из {len(sorted_levels)} участников",
+        value=f"**#{user_rank}** из {len(sorted_levels)}",
         inline=False
     )
     
-    embed.set_footer(text=f"ID: {target.id} | Warhound Logistics", icon_url=target.avatar.url if target.avatar else None)
+    # Подвал
+    embed.set_footer(
+        text=f"ID: {target.id} | Warhound Logistics",
+        icon_url=avatar_url
+    )
     
     await interaction.followup.send(embed=embed)
 
@@ -250,8 +324,7 @@ async def leaderboard(interaction: discord.Interaction):
         embed.add_field(
             name=f"{medal} {name}",
             value=f"{level_emoji} **Уровень {lvl}**\n"
-                  f"💬 {msgs:,} сообщений\n"
-                  f"🎤 {voice} мин в голосе",
+                  f"💬 {msgs:,} | 🎤 {voice} мин",
             inline=True
         )
     
@@ -274,14 +347,8 @@ async def progress(interaction: discord.Interaction):
     
     lvl, prog, required, percentage = get_xp_progress(total_xp)
     
-    bar_length = 20
-    filled = int(bar_length * (percentage / 100))
-    empty = bar_length - filled
-    progress_bar = "▓" * filled + "░" * empty
-    
     embed = discord.Embed(
         title=f"📊 Прогресс: {interaction.user.display_name}",
-        description=f"```[{progress_bar}] {percentage}%```",
         color=discord.Color.blue(),
         timestamp=discord.utils.utcnow()
     )
@@ -863,7 +930,8 @@ class VerifyButton(Button):
             await interaction.user.add_roles(role)
             await interaction.response.send_message(
                 f"{interaction.user.mention}, верификация пройдена! 🐺⚡\n"
-                f"📊 Проверьте свой уровень: `/level`",
+                f"📊 Проверьте свой уровень: `/level`\n"
+                f"💬 Установите статус: `/status`",
                 ephemeral=True
             )
         else:
@@ -951,7 +1019,8 @@ async def ping(interaction: discord.Interaction):
 @bot.command(name="help")
 async def help_command(ctx):
     embed = discord.Embed(title="📚 Команды Warhound Logistics", color=discord.Color.blue())
-    embed.add_field(name="🎖️ Уровни", value="`/level` - Моя карточка\n`/leaderboard` - Топ\n`/progress` - Прогресс", inline=False)
+    embed.add_field(name="🎖️ Уровни", value="`/level` - Профиль\n`/leaderboard` - Топ\n`/progress` - Прогресс", inline=False)
+    embed.add_field(name="💬 Статус", value="`/status` - Установить статус", inline=False)
     embed.add_field(name="🔐 Верификация", value="`/verify` - Подтвердить аккаунт", inline=False)
     embed.add_field(name="🎂 Дни рождения", value="`/birthday` - Установить дату\n`/birthdays` - Список ДР", inline=False)
     embed.add_field(name="🎫 Поддержка", value="`/ticket` - Создать тикет", inline=False)
@@ -1000,7 +1069,7 @@ async def on_member_join(member):
             value="1. `/verify` - верификация\n"
                   "2. Заявка: https://hub.truckyapp.com/vtc/warhound-logistics/apply\n"
                   "3. `/level` - проверить уровень\n"
-                  "4. `/birthday` - установить ДР",
+                  "4. `/status` - установить статус",
             inline=False
         )
         embed.set_footer(text="🔥 «Беги со стаей»")
@@ -1017,8 +1086,3 @@ if __name__ == "__main__":
         print("❌ Неверный токен!")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
-
-
-
-
-
