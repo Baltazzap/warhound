@@ -138,90 +138,91 @@ def add_xp(user_id, amount):
 
 
 # ============================================
-# 🖼️ ГЕНЕРАЦИЯ КАРТОЧКИ УРОВНЯ (ИСПРАВЛЕННАЯ)
+# 🖼️ ГЕНЕРАЦИЯ КАРТОЧКИ УРОВНЯ (v2.0 - УЛУЧШЕННАЯ)
 # ============================================
 async def create_level_card(user: discord.Member, level_data: dict):
-    """Создать карточку уровня с аватаркой и баннером"""
+    """Создать красивую карточку уровня"""
     
-    # Размеры
-    width, height = 900, 300
+    # Размеры карточки
+    WIDTH, HEIGHT = 1000, 400
     
-    # Создаём изображение с градиентным фоном
-    img = Image.new('RGB', (width, height), color=(20, 20, 35))
+    # Создаём изображение
+    img = Image.new('RGBA', (WIDTH, HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     
-    # Градиентный фон
-    for i in range(height):
-        r = int(30 + (i / height) * 20)
-        g = int(30 + (i / height) * 15)
-        b = int(50 + (i / height) * 30)
-        draw.rectangle([0, i, width, i+1], fill=(r, g, b))
+    # === ФОН С ГРАДИЕНТОМ ===
+    for y in range(HEIGHT):
+        # Тёмно-синий градиент
+        r = int(25 + (y / HEIGHT) * 15)
+        g = int(25 + (y / HEIGHT) * 10)
+        b = int(45 + (y / HEIGHT) * 25)
+        draw.rectangle([0, y, WIDTH, y+1], fill=(r, g, b, 255))
     
-    # Загружаем аватарку
+    # === ЗАГРУЗКА АВАТАРКИ ===
     try:
         avatar_url = user.avatar.url if user.avatar else user.default_avatar.url
         async with aiohttp.ClientSession() as session:
-            async with session.get(avatar_url) as resp:
-                avatar_data = await resp.read()
-        avatar = Image.open(io.BytesIO(avatar_data)).convert('RGBA')
-        avatar = avatar.resize((200, 200), Image.Resampling.LANCZOS)
+            async with session.get(avatar_url) as response:
+                avatar_data = await response.read()
         
-        # Круглая маска для аватарки
-        mask = Image.new('L', (200, 200), 0)
+        avatar = Image.open(io.BytesIO(avatar_data)).convert('RGBA')
+        avatar = avatar.resize((250, 250), Image.Resampling.LANCZOS)
+        
+        # Круглая маска
+        mask = Image.new('L', (250, 250), 0)
         draw_mask = ImageDraw.Draw(mask)
-        draw_mask.ellipse([0, 0, 200, 200], fill=255)
+        draw_mask.ellipse([0, 0, 250, 250], fill=255)
         avatar.putalpha(mask)
         
-        # Размещаем аватарку с тенью
-        shadow = Image.new('RGBA', (210, 210), (0, 0, 0, 128))
-        shadow_mask = Image.new('L', (210, 210), 0)
-        ImageDraw.Draw(shadow_mask).ellipse([0, 0, 210, 210], fill=128)
-        shadow.putalpha(shadow_mask)
-        img.paste(shadow, (45, 55), shadow)
-        img.paste(avatar, (50, 50), avatar)
+        # Тень под аватаркой
+        shadow = Image.new('RGBA', (260, 260), (0, 0, 0, 0))
+        shadow_draw = ImageDraw.Draw(shadow)
+        shadow_draw.ellipse([0, 0, 260, 260], fill=(0, 0, 0, 100))
+        img.paste(shadow, (45, 70), shadow)
+        
+        # Размещаем аватарку
+        img.paste(avatar, (50, 75), avatar)
+        
+        # Рамка вокруг аватарки (золотая)
+        draw.ellipse([48, 73, 302, 327], outline=(255, 215, 0), width=4)
+        
     except Exception as e:
-        print(f"Ошибка загрузки аватарки: {e}")
-        draw.ellipse([50, 50, 250, 250], fill=(100, 100, 100))
+        print(f"⚠️ Ошибка аватарки: {e}")
+        # Запасной вариант - серый круг
+        draw.ellipse([50, 75, 300, 325], fill=(100, 100, 100))
+        draw.ellipse([50, 75, 300, 325], outline=(255, 215, 0), width=4)
     
-    # === ПОИСК ШРИФТОВ С ПОДДЕРЖКОЙ КИРИЛЛИЦЫ ===
+    # === ШРИФТЫ (БОЛЬШИЕ) ===
+    # Пробуем загрузить шрифты
     font_paths = [
-        "arial.ttf",                    # Windows
-        "C:/Windows/Fonts/arial.ttf",  # Windows полный путь
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Linux
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",  # Arch Linux
-        "/System/Library/Fonts/Helvetica.ttc",  # macOS
-        "fonts/NotoSans-Regular.ttf",   # Noto Sans
-        "DejaVuSans.ttf",               # DejaVu
+        "C:/Windows/Fonts/arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "arial.ttf",
+        "DejaVuSans-Bold.ttf",
     ]
     
-    # Пробуем загрузить шрифты
-    font_large = None
-    font_medium = None
-    font_small = None
+    font_title = None
+    font_stat = None
     
-    for font_path in font_paths:
+    for path in font_paths:
         try:
-            font_large = ImageFont.truetype(font_path, 48)
-            font_medium = ImageFont.truetype(font_path, 32)
-            font_small = ImageFont.truetype(font_path, 24)
+            font_title = ImageFont.truetype(path, 64)  # ОЧЕНЬ КРУПНЫЙ
+            font_stat = ImageFont.truetype(path, 42)   # КРУПНЫЙ
             break
         except:
             continue
     
-    # Если не нашли - используем дефолтный (но кириллица не будет работать)
-    if font_large is None:
+    if font_title is None:
         try:
-            font_large = ImageFont.load_default()
-            font_medium = ImageFont.load_default()
-            font_small = ImageFont.load_default()
-            print("⚠️ Шрифт с кириллицей не найден! Установите Arial или DejaVu Sans")
+            font_title = ImageFont.load_default()
+            font_stat = ImageFont.load_default()
         except:
-            # Создаём простой шрифт
-            font_large = ImageFont.truetype("arial.ttf", 48) if os.name == 'nt' else ImageFont.load_default()
-            font_medium = font_large
-            font_small = font_large
+            font_title = ImageFont.truetype("arial.ttf", 64)
+            font_stat = ImageFont.truetype("arial.ttf", 42)
     
-    # Данные пользователя
+    # === ДАННЫЕ ===
     level = level_data.get("level", 1)
     messages = level_data.get("messages", 0)
     voice_mins = level_data.get("voice_minutes", 0)
@@ -230,54 +231,85 @@ async def create_level_card(user: discord.Member, level_data: dict):
     hours = voice_mins // 60
     mins = voice_mins % 60
     
-    # Прогресс
     lvl, progress, required, percentage = get_xp_progress(total_xp)
     
-    # === РИСОВАНИЕ ТЕКСТА ===
-    # Никнейм (белый, жирный)
-    draw.text((280, 60), user.display_name[:25], fill=(255, 255, 255), font=font_large)
+    # === ТЕКСТ ===
+    start_x = 330  # Начало текста справа от аватарки
     
-    # Уровень (золотой)
-    level_text = f"Уровень {level}" if level < MAX_LEVEL else "МАКСИМАЛЬНЫЙ УРОВЕНЬ"
-    draw.text((280, 120), level_text, fill=(255, 215, 0), font=font_medium)
+    # Никнейм (ОЧЕНЬ КРУПНЫЙ, белый)
+    nickname = user.display_name[:30]  # Обрезаем если длинный
+    draw.text((start_x, 85), nickname, fill=(255, 255, 255), font=font_title)
     
-    # Статистика (светло-серый)
-    stats_y = 170
-    draw.text((280, stats_y), f"💬 Сообщений: {messages:,}", fill=(220, 220, 220), font=font_small)
-    draw.text((280, stats_y + 35), f"🎤 В голосе: {hours}ч {mins}м", fill=(220, 220, 220), font=font_small)
-    draw.text((280, stats_y + 70), f"⭐ Всего XP: {total_xp:,}", fill=(220, 220, 220), font=font_small)
+    # Уровень (БОЛЬШОЙ, золотой)
+    if level >= MAX_LEVEL:
+        level_text = "🏆 MAX LEVEL 🏆"
+        level_color = (255, 215, 0)
+    else:
+        level_text = f"Уровень {level}"
+        level_color = (255, 215, 0)
     
-    # Прогресс бар
-    bar_x, bar_y, bar_w, bar_h = 280, 255, 570, 25
+    draw.text((start_x, 165), level_text, fill=level_color, font=font_title)
     
-    # Фон прогресс бара
-    draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], radius=12, fill=(40, 40, 55))
+    # Статистика (КРУПНАЯ, светло-серая)
+    stat_y = 250
+    stat_color = (230, 230, 230)
+    
+    draw.text((start_x, stat_y), f"💬 Сообщений: {messages:,}", fill=stat_color, font=font_stat)
+    draw.text((start_x, stat_y + 55), f"🎤 В голосе: {hours}ч {mins}м", fill=stat_color, font=font_stat)
+    draw.text((start_x, stat_y + 110), f"⭐ XP: {total_xp:,}", fill=stat_color, font=font_stat)
+    
+    # === ПРОГРЕСС БАР (БОЛЬШОЙ) ===
+    bar_x = start_x
+    bar_y = 340
+    bar_width = 650
+    bar_height = 35
+    
+    # Фон бара (тёмный)
+    draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_width, bar_y + bar_height], radius=18, fill=(30, 30, 45))
     
     # Заполнение (градиент)
-    if required > 0 and lvl < MAX_LEVEL:
-        fill_width = int(bar_w * (progress / required))
+    if required > 0 and level < MAX_LEVEL:
+        fill_width = int(bar_width * (progress / required))
+        
+        # Градиент от фиолетового к голубому
         for i in range(fill_width):
-            # Градиент от фиолетового к голубому
-            r = int(138 + (i / fill_width) * 43) if fill_width > 0 else 138
-            g = int(43 + (i / fill_width) * 146) if fill_width > 0 else 43
-            b = int(226 + (i / fill_width) * 29) if fill_width > 0 else 226
-            draw.rectangle([bar_x + i, bar_y + 2, bar_x + i + 1, bar_y + bar_h - 2], fill=(r, g, b))
+            ratio = i / fill_width if fill_width > 0 else 0
+            r = int(138 + ratio * 100)
+            g = int(43 + ratio * 100)
+            b = int(226 + ratio * 29)
+            draw.rectangle([bar_x + i, bar_y + 3, bar_x + i + 1, bar_y + bar_height - 3], fill=(r, g, b))
     
-    # Текст прогресса
-    if lvl < MAX_LEVEL:
-        progress_text = f"{progress:,} / {required:,} XP ({percentage}%)"
+    # Текст прогресса (справа)
+    if level < MAX_LEVEL:
+        progress_text = f"{progress:,} / {required:,} XP"
     else:
-        progress_text = "МАКСИМУМ"
+        progress_text = "МАКСИМУМ ДОСТИГНУТ"
     
-    draw.text((bar_x + bar_w + 10, bar_y + 6), progress_text, fill=(255, 255, 255), font=font_small)
+    # Маленький шрифт для текста прогресса
+    try:
+        font_progress = ImageFont.truetype("arial.ttf", 28)
+    except:
+        font_progress = ImageFont.load_default()
     
-    # Рамка вокруг карточки
-    draw.rectangle([0, 0, width-1, height-1], outline=(80, 80, 100), width=3)
+    draw.text((bar_x + bar_width + 15, bar_y + 8), progress_text, fill=(200, 200, 200), font=font_progress)
     
-    # Логотип/ватермарка
-    draw.text((width - 150, height - 25), "Warhound Logistics", fill=(100, 100, 120), font=font_small)
+    # Процент
+    if level < MAX_LEVEL:
+        percent_text = f"({percentage}%)"
+        draw.text((bar_x + bar_width + 15, bar_y + 38), percent_text, fill=(150, 150, 150), font=font_progress)
     
-    # Сохраняем в буфер
+    # === РАМКА ===
+    draw.rectangle([0, 0, WIDTH-1, HEIGHT-1], outline=(100, 100, 120), width=5)
+    
+    # === ЛОГОТИП ===
+    try:
+        logo_font = ImageFont.truetype("arial.ttf", 24)
+    except:
+        logo_font = ImageFont.load_default()
+    
+    draw.text((WIDTH - 280, HEIGHT - 35), "Warhound Logistics", fill=(120, 120, 140), font=logo_font)
+    
+    # === СОХРАНЕНИЕ ===
     buffer = io.BytesIO()
     img.save(buffer, format='PNG')
     buffer.seek(0)
@@ -304,24 +336,20 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
         card_buffer = await create_level_card(target, level_data)
         file = discord.File(card_buffer, filename=f"level_{target.id}.png")
         
-        embed = discord.Embed(
-            title=f"🎖️ Карточка уровня: {target.display_name}",
-            color=discord.Color.gold()
-        )
-        embed.set_image(url=f"attachment://level_{target.id}.png")
-        
-        await interaction.followup.send(file=file, embed=embed)
+        await interaction.followup.send(file=file)
     except Exception as e:
-        print(f"Ошибка генерации карточки: {e}")
+        print(f"❌ Ошибка генерации: {e}")
         
-        # Запасной вариант - текстовый embed
+        # Текстовая версия (запасной вариант)
         lvl, progress, required, percentage = get_xp_progress(level_data.get("xp", 0))
+        hours = level_data.get("voice_minutes", 0) // 60
+        mins = level_data.get("voice_minutes", 0) % 60
         
         embed = discord.Embed(
             title=f"🎖️ Уровень: {target.display_name}",
             description=f"**Уровень {lvl}**\n\n"
                        f"💬 **Сообщений:** {level_data.get('messages', 0):,}\n"
-                       f"🎤 **В голосе:** {level_data.get('voice_minutes', 0)} мин\n"
+                       f"🎤 **В голосе:** {hours}ч {mins}м\n"
                        f"⭐ **XP:** {progress:,} / {required:,} ({percentage}%)\n"
                        f"📊 **Всего XP:** {level_data.get('xp', 0):,}",
             color=discord.Color.gold()
@@ -1124,4 +1152,5 @@ if __name__ == "__main__":
         print("❌ Неверный токен!")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
+
 
