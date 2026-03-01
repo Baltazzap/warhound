@@ -193,7 +193,7 @@ def get_user_status(user_id: str) -> str:
 
 
 # ============================================
-# 🎖️ КОМАНДЫ УРОВНЕЙ (ОБНОВЛЁННЫЙ EMBED)
+# 🎖️ КОМАНДЫ УРОВНЕЙ (ФИНАЛЬНАЯ ВЕРСИЯ)
 # ============================================
 @tree.command(name="level", description="🎖️ Показать свой уровень")
 @app_commands.describe(member="Участник для просмотра (по умолчанию - вы)")
@@ -214,19 +214,21 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
     hours = voice_mins // 60
     mins = voice_mins % 60
     
+    lvl, progress, required, percentage = get_xp_progress(total_xp)
+    
     # Цвет embed по уровню
     if level >= 100:
         color = discord.Color.gold()
-        level_emoji = "👑"
     elif level >= 50:
         color = discord.Color.purple()
-        level_emoji = "⭐"
     else:
         color = discord.Color.blue()
-        level_emoji = "🔹"
     
     # Получаем статус пользователя
     user_status = get_user_status(user_id)
+    
+    # Аватарка для thumbnail
+    avatar_url = target.avatar.url if target.avatar else target.default_avatar.url
     
     # Создаём embed
     embed = discord.Embed(
@@ -235,14 +237,10 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
         timestamp=discord.utils.utcnow()
     )
     
-    # Мини аватарка (thumbnail)
-    avatar_url = target.avatar.url if target.avatar else target.default_avatar.url
+    # ✅ МИНИ АВАТАРКА (thumbnail - левый верхний угол)
     embed.set_thumbnail(url=avatar_url)
     
-    # Описание с уровнем
-    embed.description = f"**{level_emoji} Уровень {level}** {'| МАКСИМАЛЬНЫЙ УРОВЕНЬ!' if level >= MAX_LEVEL else ''}"
-    
-    # Статус (между профилем и уровнем)
+    # Статус (если есть)
     if user_status:
         embed.add_field(
             name="💬 Статус",
@@ -263,30 +261,43 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
         inline=True
     )
     
-    # Всего XP - снизу отдельно
+    # Пустое поле для выравнивания
+    embed.add_field(
+        name="\u200b",
+        value="\u200b",
+        inline=True
+    )
+    
+    # Всего XP - отдельно снизу
     embed.add_field(
         name="⭐ Всего заработано XP",
         value=f"```json\n{total_xp:,}```",
         inline=False
     )
     
-    # Ранг в сервере
-    all_levels = load_levels()
-    sorted_levels = sorted(all_levels.items(), key=lambda x: x[1].get("level", 1), reverse=True)
-    user_rank = next((i + 1 for i, (uid, _) in enumerate(sorted_levels) if uid == user_id), len(sorted_levels) + 1)
-    
+    # Уровень - под XP
+    level_emoji = "👑" if level >= MAX_LEVEL else "⭐" if level >= 50 else "🔹"
     embed.add_field(
-        name="🏆 Место в топе",
-        value=f"**#{user_rank}** из {len(sorted_levels)}",
-        inline=False
+        name=f"{level_emoji} Уровень",
+        value=f"```json\n{level}```",
+        inline=True
     )
     
-    # Подвал
+    # Текущий прогресс до следующего уровня
+    xp_needed = required - progress
+    embed.add_field(
+        name="📈 До следующего уровня",
+        value=f"```json\n{progress:,} / {required:,} XP```",
+        inline=True
+    )
+    
+    # Подвал с аватаркой
     embed.set_footer(
         text=f"ID: {target.id} | Warhound Logistics",
         icon_url=avatar_url
     )
     
+    # ✅ Отправляем с thumbnail (аватарка будет в левом верхнем углу)
     await interaction.followup.send(embed=embed)
 
 
@@ -1086,3 +1097,4 @@ if __name__ == "__main__":
         print("❌ Неверный токен!")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
+
