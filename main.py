@@ -173,15 +173,15 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
     # Статистика
     embed.add_field(
         name="📊 Статистика профиля:",
-        value=f"**Сообщений** ```{messages:,}```\n"
-              f"**Голосовой Актив** ```{hours}ч {mins}м```\n"
-              f"**Всего XP** ```{total_xp:,}```",
+        value=f"💬 **Сообщений** ```{messages:,}```\n"
+              f"🎤 **Голосовой Актив** ```{hours}час. {mins}мин.```\n"
+              f"⭐ **Всего XP** ```{total_xp:,}```",
         inline=False
     )
     
     # Прогресс бар
     if level < MAX_LEVEL:
-        bar_length = 10
+        bar_length = 25
         filled = int(bar_length * (progress / required))
         empty = bar_length - filled
         progress_bar = "▓" * filled + "░" * empty
@@ -1017,6 +1017,7 @@ if __name__ == "__main__":
         print("❌ Неверный токен!")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
+
 
 
 
