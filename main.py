@@ -1018,6 +1018,172 @@ async def delete_channel(ctx):
     await ctx.author.voice.channel.delete()
     await ctx.send("✅ Удалён", delete_after=5)
 
+# ============================================
+# 🖥️ СТАТУС СЕРВЕРОВ TRUCKERSMP
+# ============================================
+@tree.command(name="servers", description="🚛 Статус серверов TruckersMP")
+async def servers(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://api.truckersmp.com/v2/servers", timeout=15) as resp:
+                if resp.status != 200:
+                    await interaction.followup.send("❌ Не удалось получить данные с TruckersMP!", ephemeral=True)
+                    return
+                
+                data = await resp.json()
+    
+    except Exception as e:
+        print(f"❌ Ошибка получения данных: {e}")
+        await interaction.followup.send("❌ Ошибка подключения к TruckersMP!", ephemeral=True)
+        return
+    
+    # Получаем список серверов
+    servers_list = data.get("response", [])
+    
+    if not servers_list:
+        await interaction.followup.send("📭 Нет доступных серверов!", ephemeral=True)
+        return
+    
+    # Сортировка по количеству игроков
+    servers_list = sorted(servers_list, key=lambda x: int(x.get("players", 0)), reverse=True)
+    
+    # Общий онлайн
+    total_players = sum(int(s.get("players", 0)) for s in servers_list)
+    total_servers = len(servers_list)
+    online_servers = sum(1 for s in servers_list if s.get("game") != "offline")
+    
+    # Создаём embed
+    embed = discord.Embed(
+        title="🚛 TruckersMP — Статус серверов",
+        description=f"🌐 **Всего серверов:** {total_servers}\n"
+                   f"🟢 **Онлайн:** {online_servers}\n"
+                   f"👥 **Игроков:** {total_players:,}",
+        color=discord.Color.blue(),
+        timestamp=discord.utils.utcnow()
+    )
+    
+    # Добавляем каждый сервер
+    for server in servers_list[:10]:  # Показываем топ 10
+        name = server.get("server", "Неизвестно")
+        shortname = server.get("shortname", "")
+        players = int(server.get("players", 0))
+        max_players = int(server.get("maxPlayers", 0))
+        game = server.get("game", "ETS2")
+        
+        # Статус сервера
+        if players > 0:
+            status_emoji = "🟢"
+        else:
+            status_emoji = "🟡"
+        
+        # Прогресс бар заполненности
+        bar_length = 10
+        if max_players > 0:
+            filled = int(bar_length * (players / max_players))
+        else:
+            filled = 0
+        empty = bar_length - filled
+        progress_bar = "▓" * filled + "░" * empty
+        
+        # Игра
+        game_emoji = "🚛" if game == "ets2" else "🚙" if game == "ats" else "🎮"
+        
+        # Форматируем название
+        server_name = f"{game_emoji} {name}"
+        if shortname:
+            server_name += f" [{shortname}]"
+        
+        embed.add_field(
+            name=f"{status_emoji} {server_name}",
+            value=f"```[{progress_bar}] {players:,} / {max_players:,}```",
+            inline=True
+        )
+    
+    # Подвал
+    embed.set_footer(text="Данные обновляются каждые 5 минут | TruckersMP API")
+    embed.set_thumbnail(url="https://truckersmp.com/assets/images/logo.png")
+    
+    # Кнопка для обновления
+    view = View()
+    refresh_btn = Button(label="🔄 Обновить", style=discord.ButtonStyle.green)
+    
+    async def refresh_callback(inter: discord.Interaction):
+        await inter.response.defer()
+        # Рекурсивный вызов команды
+        await servers(inter)
+    
+    refresh_btn.callback = refresh_callback
+    view.add_item(refresh_btn)
+    
+    await interaction.followup.send(embed=embed, view=view)
+
+
+# ============================================
+# 🖥️ СТАТУС СЕРВЕРА (ОБНОВЛЁННАЯ)
+# ============================================
+@tasks.loop(minutes=5)
+async def check_server_status():
+    """Фоновая проверка статуса серверов для presence бота"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://api.truckersmp.com/v2/servers", timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    servers = data.get("response", [])
+                    total_players = sum(int(s.get("players", 0)) for s in servers)
+                    
+                    if total_players > 0:
+                        await bot.change_presence(
+                            activity=discord.Game(name=f"🚛 TruckersMP | {total_players:,} игроков онлайн")
+                        )
+                    else:
+                        await bot.change_presence(activity=discord.Game(name="🌙 Серверы пустуют"))
+    except:
+        await bot.change_presence(activity=discord.Game(name="🌙 Статус неизвестен"))
+
+
+@check_server_status.before_loop
+async def before_check_server_status():
+    await bot.wait_until_ready()
+
+
+@tree.command(name="server", description="🖥️ Быстрый статус TruckersMP")
+async def server_status(interaction: discord.Interaction):
+    """Быстрый просмотр общего статуса"""
+    await interaction.response.defer()
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://api.truckersmp.com/v2/servers", timeout=10) as resp:
+                if resp.status != 200:
+                    await interaction.followup.send("❌ Не удалось получить данные!", ephemeral=True)
+                    return
+                
+                data = await resp.json()
+    except:
+        await interaction.followup.send("❌ Ошибка подключения!", ephemeral=True)
+        return
+    
+    servers_list = data.get("response", [])
+    total_players = sum(int(s.get("players", 0)) for s in servers_list)
+    online_servers = sum(1 for s in servers_list if int(s.get("players", 0)) > 0)
+    
+    # Топ сервер по игрокам
+    top_server = max(servers_list, key=lambda x: int(x.get("players", 0))) if servers_list else None
+    
+    embed = discord.Embed(
+        title="🖥️ TruckersMP — Быстрый статус",
+        color=discord.Color.green(),
+        timestamp=discord.utils.utcnow()
+    )
+    
+    embed.add_field(name="👥 Игроков онлайн", value=f"**{total_players:,}**", inline=True)
+    embed.add_field(name="🌐 Серверов онлайн", value=f"**{online_servers}**", inline=True)
+    embed.add_field(name="🏆 Самый популярный", value=f"**{top_server.get('server', 'N/A')}**" if top_server else "N/A", inline=True)
+    
+    if top_server and int(top_server.get("players", 
 
 # ============================================
 # 🎲 ДОП. КОМАНДЫ
@@ -1097,4 +1263,5 @@ if __name__ == "__main__":
         print("❌ Неверный токен!")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
+
 
