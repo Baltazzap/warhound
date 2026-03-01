@@ -138,93 +138,68 @@ def add_xp(user_id, amount):
 
 
 # ============================================
-# 📥 ЗАГРУЗКА ШРИФТОВ (НАДЁЖНАЯ)
+# 📥 ЗАГРУЗКА ШРИФТА (ПРОСТАЯ)
 # ============================================
 import urllib.request
 import os
 
-def download_font():
-    """Скачивает шрифт если его нет"""
-    font_path = "DejaVuSans-Bold.ttf"
-    
-    if not os.path.exists(font_path):
-        print("⏳ Загружаю шрифт DejaVu Sans Bold...")
-        try:
-            url = "https://github.com/powerline/fonts/raw/master/DejaVuSans/DejaVu%20Sans%20Bold.ttf"
-            urllib.request.urlretrieve(url, font_path)
-            print("✅ Шрифт загружен!")
-        except Exception as e:
-            print(f"⚠️ Не удалось загрузить: {e}")
-            # Пробуем альтернативный URL
-            try:
-                url = "https://raw.githubusercontent.com/google/fonts/main/apache/dejavusans/DejaVuSans-Bold.ttf"
-                urllib.request.urlretrieve(url, font_path)
-                print("✅ Шрифт загружен с альтернативного источника!")
-            except:
-                return None
-    return font_path
+FONT_FILE = "font.ttf"
 
-# Загружаем шрифт при старте
-FONT_PATH = download_font()
-
-# Функция для получения шрифта
-def get_font(size):
-    """Возвращает шрифт нужного размера"""
-    if FONT_PATH and os.path.exists(FONT_PATH):
-        try:
-            return ImageFont.truetype(FONT_PATH, size)
-        except:
-            pass
-    
-    # Пробуем системные шрифты
-    system_fonts = [
-        ("C:/Windows/Fonts/arial.ttf", size),
-        ("C:/Windows/Fonts/segoeui.ttf", size),
-        ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size),
-        ("/usr/share/fonts/TTF/DejaVuSans-Bold.ttf", size),
-        ("/System/Library/Fonts/Helvetica.ttc", size),
-    ]
-    
-    for font_path, font_size in system_fonts:
-        try:
-            return ImageFont.truetype(font_path, font_size)
-        except:
-            continue
-    
-    # Последний вариант - дефолтный
+if not os.path.exists(FONT_FILE):
+    print("⏳ Загружаю шрифт...")
     try:
-        return ImageFont.load_default()
-    except:
-        return ImageFont.truetype("arial.ttf", size)
+        url = "https://raw.githubusercontent.com/google/fonts/main/apache/roboto/Roboto-Bold.ttf"
+        urllib.request.urlretrieve(url, FONT_FILE)
+        print("✅ Шрифт загружен!")
+    except Exception as e:
+        print(f"⚠️ Ошибка загрузки шрифта: {e}")
+        FONT_FILE = None
 
 
 # ============================================
-# 🖼️ ГЕНЕРАЦИЯ КАРТОЧКИ (v4.0 - ГАРАНТИРОВАННО РАБОТАЕТ)
+# 🖼️ ГЕНЕРАЦИЯ КАРТОЧКИ (v5.0 - ИСПРАВЛЕННАЯ)
 # ============================================
 async def create_level_card(user: discord.Member, level_data: dict):
     """Создать карточку уровня"""
     
-    WIDTH, HEIGHT = 1100, 450
+    # Размеры
+    WIDTH = 1000
+    HEIGHT = 400
     
     # Создаём изображение
-    img = Image.new('RGBA', (WIDTH, HEIGHT), (35, 25, 65, 255))
+    img = Image.new('RGBA', (WIDTH, HEIGHT), (40, 30, 80, 255))
     draw = ImageDraw.Draw(img)
     
-    # === ЗАГРУЖАЕМ ШРИФТЫ (БОЛЬШИЕ!) ===
-    font_huge = get_font(72)      # ОЧЕНЬ БОЛЬШОЙ
-    font_large = get_font(52)     # БОЛЬШОЙ
-    font_medium = get_font(38)    # СРЕДНИЙ
-    font_small = get_font(28)     # МАЛЕНЬКИЙ
+    # === ЗАГРУЗКА ШРИФТОВ ===
+    def get_font(size):
+        if FONT_FILE and os.path.exists(FONT_FILE):
+            try:
+                return ImageFont.truetype(FONT_FILE, size)
+            except:
+                pass
+        try:
+            return ImageFont.truetype("arial.ttf", size)
+        except:
+            return ImageFont.load_default()
     
-    # === ФОН С ГРАДИЕНТОМ ===
+    font_title = get_font(48)    # Заголовок
+    font_stat = get_font(36)     # Статистика
+    font_small = get_font(24)    # Мелкий текст
+    
+    # === ФОН ===
+    # Градиент
     for y in range(HEIGHT):
         ratio = y / HEIGHT
-        r = int(35 + ratio * 15)
-        g = int(25 + ratio * 10)
-        b = int(65 + ratio * 25)
+        r = int(40 + ratio * 10)
+        g = int(30 + ratio * 8)
+        b = int(80 + ratio * 20)
         draw.rectangle([0, y, WIDTH, y+1], fill=(r, g, b, 255))
     
     # === АВАТАРКА ===
+    avatar_size = 240
+    avatar_x = 40
+    avatar_y = (HEIGHT - avatar_size) // 2  # Центрируем по вертикали
+    
     try:
         avatar_url = user.avatar.url if user.avatar else user.default_avatar.url
         async with aiohttp.ClientSession() as session:
@@ -232,30 +207,32 @@ async def create_level_card(user: discord.Member, level_data: dict):
                 avatar_data = await resp.read()
         
         avatar = Image.open(io.BytesIO(avatar_data)).convert('RGBA')
-        avatar = avatar.resize((280, 280), Image.Resampling.LANCZOS)
+        avatar = avatar.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
         
         # Круглая маска
-        mask = Image.new('L', (280, 280), 0)
-        ImageDraw.Draw(mask).ellipse([0, 0, 280, 280], fill=255)
+        mask = Image.new('L', (avatar_size, avatar_size), 0)
+        ImageDraw.Draw(mask).ellipse([0, 0, avatar_size, avatar_size], fill=255)
         avatar.putalpha(mask)
         
         # Тень
-        for i in range(5, 0, -1):
-            shadow = Image.new('RGBA', (280 + i*2, 280 + i*2), (0, 0, 0, 0))
-            shadow_draw = ImageDraw.Draw(shadow)
-            shadow_draw.ellipse([0, 0, 280 + i*2, 280 + i*2], fill=(0, 0, 0, int(60/i)))
-            img.paste(shadow, (78 - i, 83 - i), shadow)
+        for i in range(4, 0, -1):
+            shadow = Image.new('RGBA', (avatar_size + i*2, avatar_size + i*2), (0, 0, 0, 0))
+            ImageDraw.Draw(shadow).ellipse([0, 0, avatar_size + i*2, avatar_size + i*2], fill=(0, 0, 0, int(80/i)))
+            img.paste(shadow, (avatar_x - i, avatar_y - i), shadow)
         
-        img.paste(avatar, (80, 85), avatar)
+        # Аватарка
+        img.paste(avatar, (avatar_x, avatar_y), avatar)
         
-        # Рамка
-        draw.ellipse([78, 83, 362, 367], outline=(255, 215, 0), width=5)
-        draw.ellipse([76, 81, 364, 369], outline=(255, 255, 200), width=2)
+        # Золотая рамка
+        draw.ellipse([avatar_x - 3, avatar_y - 3, avatar_x + avatar_size + 3, avatar_y + avatar_size + 3], 
+                    outline=(255, 215, 0), width=4)
         
     except Exception as e:
         print(f"⚠️ Ошибка аватарки: {e}")
-        draw.ellipse([80, 85, 360, 365], fill=(80, 70, 100))
-        draw.ellipse([78, 83, 362, 367], outline=(255, 215, 0), width=5)
+        draw.ellipse([avatar_x, avatar_y, avatar_x + avatar_size, avatar_y + avatar_size], 
+                    fill=(80, 70, 100))
+        draw.ellipse([avatar_x - 3, avatar_y - 3, avatar_x + avatar_size + 3, avatar_y + avatar_size + 3], 
+                    outline=(255, 215, 0), width=4)
     
     # === ДАННЫЕ ===
     level = level_data.get("level", 1)
@@ -267,63 +244,75 @@ async def create_level_card(user: discord.Member, level_data: dict):
     mins = voice_mins % 60
     lvl, progress, required, percentage = get_xp_progress(total_xp)
     
-    # === ТЕКСТ ===
-    x_start = 400
+    # === ТЕКСТ (ВЫРАВНИВАНИЕ) ===
+    text_start_x = avatar_x + avatar_size + 40  # Отступ от аватарки
+    text_start_y = 80  # Отступ сверху
     
-    # Никнейм (72px - ОЧЕНЬ БОЛЬШОЙ)
-    nickname = user.display_name[:25]
-    draw.text((x_start, 95), nickname, fill=(255, 255, 255), font=font_huge)
+    # Никнейм (48px - БОЛЬШОЙ)
+    nickname = user.display_name[:28]
+    draw.text((text_start_x, text_start_y), nickname, fill=(255, 255, 255), font=font_title)
     
-    # Уровень (52px - БОЛЬШОЙ)
+    # Уровень (36px)
     level_text = f"👑 MAX LEVEL" if level >= MAX_LEVEL else f"⭐ Level {level}"
-    draw.text((x_start, 180), level_text, fill=(255, 215, 0), font=font_large)
+    draw.text((text_start_x, text_start_y + 60), level_text, fill=(255, 215, 0), font=font_stat)
     
-    # Разделитель
-    draw.line([(x_start, 250), (x_start + 650, 250)], fill=(100, 100, 120), width=2)
+    # Разделительная линия
+    line_y = text_start_y + 110
+    draw.line([(text_start_x, line_y), (WIDTH - 40, line_y)], fill=(100, 100, 130), width=2)
     
-    # Статистика (38px - СРЕДНИЙ)
-    stat_y = 270
-    spacing = 50
+    # Статистика (36px) - РОВНО ПО ЛИНИИ
+    stat_y = line_y + 30
+    stat_spacing = 45
+    label_width = 180  # Ширина для лейблов
     
-    draw.text((x_start, stat_y), "💬 Messages:", fill=(180, 180, 180), font=font_medium)
-    draw.text((x_start + 300, stat_y), f"{messages:,}", fill=(255, 255, 255), font=font_medium)
+    # Сообщения
+    draw.text((text_start_x, stat_y), "Messages:", fill=(180, 180, 180), font=font_stat)
+    draw.text((text_start_x + label_width, stat_y), f"{messages:,}", fill=(255, 255, 255), font=font_stat)
     
-    draw.text((x_start, stat_y + spacing), "🎤 Voice Time:", fill=(180, 180, 180), font=font_medium)
-    draw.text((x_start + 300, stat_y + spacing), f"{hours}h {mins}m", fill=(255, 255, 255), font=font_medium)
+    # Голос
+    draw.text((text_start_x, stat_y + stat_spacing), "Voice Time:", fill=(180, 180, 180), font=font_stat)
+    draw.text((text_start_x + label_width, stat_y + stat_spacing), f"{hours}h {mins}m", fill=(255, 255, 255), font=font_stat)
     
-    draw.text((x_start, stat_y + spacing * 2), "⭐ Total XP:", fill=(180, 180, 180), font=font_medium)
-    draw.text((x_start + 300, stat_y + spacing * 2), f"{total_xp:,}", fill=(255, 255, 255), font=font_medium)
+    # XP
+    draw.text((text_start_x, stat_y + stat_spacing * 2), "Total XP:", fill=(180, 180, 180), font=font_stat)
+    draw.text((text_start_x + label_width, stat_y + stat_spacing * 2), f"{total_xp:,}", fill=(255, 255, 255), font=font_stat)
     
-    # Прогресс бар (40px высотой)
-    bar_x, bar_y, bar_w, bar_h = x_start, 390, 680, 40
+    # === ПРОГРЕСС БАР ===
+    bar_x = text_start_x
+    bar_y = HEIGHT - 70
+    bar_width = WIDTH - text_start_x - 40
+    bar_height = 35
     
-    # Фон
-    draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], radius=20, fill=(30, 30, 50))
+    # Фон бара
+    draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_width, bar_y + bar_height], radius=18, fill=(25, 25, 45))
     
     # Заполнение
     if required > 0 and level < MAX_LEVEL:
-        fill_width = int(bar_w * (progress / required))
-        for i in range(fill_width):
-            ratio = i / fill_width
-            r = int(138 + ratio * 50)
-            g = int(43 + ratio * 180)
-            b = int(226 + ratio * 29)
-            draw.rectangle([bar_x + i, bar_y + 4, bar_x + i + 1, bar_y + bar_h - 4], fill=(r, g, b))
+        fill_width = int(bar_width * (progress / required))
+        if fill_width > 0:
+            # Градиент
+            for i in range(fill_width):
+                ratio = i / fill_width
+                r = int(100 + ratio * 155)
+                g = int(100 + ratio * 155)
+                b = int(200 + ratio * 55)
+                draw.rectangle([bar_x + i, bar_y + 3, bar_x + i + 1, bar_y + bar_height - 3], fill=(r, g, b))
     
-    # Текст
-    progress_text = f"{progress:,} / {required:,} XP" if level < MAX_LEVEL else "MAXIMUM"
-    draw.text((bar_x + bar_w + 20, bar_y + 10), progress_text, fill=(255, 255, 255), font=font_medium)
-    
+    # Текст прогресса
     if level < MAX_LEVEL:
-        draw.text((bar_x + bar_w + 20, bar_y + 50), f"{percentage}%", fill=(255, 215, 0), font=font_medium)
+        progress_text = f"{progress:,} / {required:,} XP ({percentage}%)"
+    else:
+        progress_text = "MAXIMUM REACHED"
     
-    # Рамка
-    draw.rectangle([0, 0, WIDTH-1, HEIGHT-1], outline=(120, 120, 150), width=5)
+    draw.text((bar_x + bar_width + 10, bar_y + 8), progress_text, fill=(255, 255, 255), font=font_small)
     
-    # Логотип
-    draw.text((WIDTH - 300, HEIGHT - 40), "Warhound Logistics", fill=(150, 150, 180), font=font_small)
+    # === РАМКА ===
+    draw.rectangle([0, 0, WIDTH-1, HEIGHT-1], outline=(100, 100, 130), width=3)
     
-    # Сохранение
+    # === ЛОГОТИП ===
+    draw.text((WIDTH - 200, HEIGHT - 25), "Warhound", fill=(120, 120, 150), font=font_small)
+    
+    # === СОХРАНЕНИЕ ===
     buffer = io.BytesIO()
     img.save(buffer, format='PNG')
     buffer.seek(0)
@@ -1165,6 +1154,7 @@ if __name__ == "__main__":
         print("❌ Неверный токен!")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
+
 
 
 
