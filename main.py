@@ -162,7 +162,7 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
     
     embed = discord.Embed(
         title=f"🎖️ Профиль: {target.display_name}",
-        description=f"**{level_emoji} Уровень {level}** {'| МАКСИМАЛЬНЫЙ УРОВЕНЬ!' if level >= MAX_LEVEL else ''}",
+        description=f"**{level_emoji} Уровень {level} —** {'| МАКСИМАЛЬНЫЙ УРОВЕНЬ!' if level >= MAX_LEVEL else ''}",
         color=color,
         timestamp=discord.utils.utcnow()
     )
@@ -173,9 +173,9 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
     # Статистика
     embed.add_field(
         name="📊 Статистика",
-        value=f"💬 **Сообщений:** {messages:,}\n"
-              f"🎤 **В голосе:** {hours}ч {mins}м\n"
-              f"⭐ **Всего XP:** {total_xp:,}",
+        value=f"💬 **Сообщений —** {messages:,}\n"
+              f"🎤 **В голосе —** {hours}ч {mins}м\n"
+              f"⭐ **Всего XP —** {total_xp:,}",
         inline=False
     )
     
@@ -1017,3 +1017,4 @@ if __name__ == "__main__":
         print("❌ Неверный токен!")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
+
