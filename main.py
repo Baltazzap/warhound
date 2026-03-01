@@ -62,7 +62,7 @@ async def on_member_join(member):
             # Отправляем приветствие
             embed = discord.Embed(
                 title="Привет, новый член стаи! ⚡",
-                description=f"Привет, {member.mention}!\n\nТы вступаешь в компанию дальнобойщиков, где скорость, дисциплина и мощь — закон. Здесь каждый рейс — испытание, а каждая миля — заслуга.",
+                description=f"Привет, {member.mention}!\n\nТы вступаешь в компанию дальнобойщиков, где скорость, дисциплина и мощь — закон.\nЗдесь каждый рейс — испытание, а каждая миля — заслуга.",
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
@@ -71,7 +71,7 @@ async def on_member_join(member):
                 value="1. Пройди верификацию: `/verify`\n"
                       "2. Ознакомься с правилами\n"
                       "3. Подавай заявку в нашем Discord: `/apply`\n"
-                      "4. Подай заявку в нашу VTC - https://hub.truckyapp.com/vtc/warhound-logistics",
+                      "4. Подай заявку в нашу VTC - https://hub.truckyapp.com/vtc/warhound-logistics/apply\n",
                 inline=False
             )
             embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
@@ -425,6 +425,131 @@ async def help_command(ctx):
         color=discord.Color.blue()
     )
     await ctx.send(embed=embed, delete_after=30)
+# --- КОМАНДА ОТПРАВКИ СООБЩЕНИЙ ОТ БОТА ---
+class EmbedModal(Modal, title="📝 Создать Embed сообщение"):
+    title_input = TextInput(
+        label="Заголовок",
+        placeholder="Введите заголовок сообщения",
+        max_length=256,
+        required=False
+    )
+    description = TextInput(
+        label="Описание",
+        style=discord.TextStyle.long,
+        placeholder="Основной текст сообщения",
+        max_length=4096,
+        required=True
+    )
+    color = TextInput(
+        label="Цвет (HEX)",
+        placeholder="#FF0000 или оставьте пустым для случайного",
+        max_length=7,
+        required=False
+    )
+    footer = TextInput(
+        label="Подвал (footer)",
+        placeholder="Текст в подвале сообщения",
+        max_length=2048,
+        required=False
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Проверка прав администратора
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ У вас нет прав администратора!", ephemeral=True)
+            return
+        
+        # Создаём embed
+        embed = discord.Embed(
+            title=self.title_input.value or "📢 Объявление",
+            description=self.description.value,
+            color=discord.Color.random() if not self.color.value else int(self.color.value.replace('#', ''), 16),
+            timestamp=discord.utils.utcnow()
+        )
+        
+        # Добавляем подвал
+        if self.footer.value:
+            embed.set_footer(text=self.footer.value, icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
+        
+        # Добавляем автора (кто отправил)
+        embed.set_author(name=f"Отправлено от: {interaction.user.display_name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
+        
+        # Отправляем в текущий канал
+        await interaction.channel.send(embed=embed)
+        await interaction.response.send_message("✅ Сообщение отправлено!", ephemeral=True)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        await interaction.response.send_message(f"❌ Ошибка: {error}", ephemeral=True)
+
+@tree.command(name="say", description="📢 Отправить сообщение от имени бота (только для админов)")
+async def say(interaction: discord.Interaction):
+    """Отправить embed сообщение от имени бота"""
+    # Проверка прав
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ У вас нет прав администратора для использования этой команды!", ephemeral=True)
+        return
+    
+    await interaction.response.send_modal(EmbedModal())
+
+@tree.command(name="embed", description="🎨 Расширенное создание embed (для админов)")
+async def embed_command(interaction: discord.Interaction):
+    """Расширенное создание embed с полями"""
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ У вас нет прав администратора!", ephemeral=True)
+        return
+    
+    embed = discord.Embed(
+        title="🎨 Конструктор Embed",
+        description="Выберите тип сообщения:",
+        color=discord.Color.blue()
+    )
+    
+    view = View()
+    
+    # Кнопка для объявления
+    announce_btn = Button(label="📢 Объявление", style=discord.ButtonStyle.blurple)
+    async def announce_callback(interaction: discord.Interaction):
+        modal = EmbedModal()
+        await interaction.response.send_modal(modal)
+    announce_btn.callback = announce_callback
+    view.add_item(announce_btn)
+    
+    # Кнопка для правил
+    rules_btn = Button(label="📋 Правила", style=discord.ButtonStyle.green)
+    async def rules_callback(interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="📋 Правила сервера",
+            description="**1.** Уважайте других участников\n"
+                       "**2.** Запрещён спам и флуд\n"
+                       "**3.** Запрещена реклама\n"
+                       "**4.** Слушайтесь администрацию\n"
+                       "**5.** Запрещены оскорбления",
+            color=discord.Color.green(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.set_footer(text="Нарушение правил = наказание")
+        await interaction.channel.send(embed=embed)
+        await interaction.response.send_message("✅ Правила отправлены!", ephemeral=True)
+    rules_btn.callback = rules_callback
+    view.add_item(rules_btn)
+    
+    # Кнопка для новостей
+    news_btn = Button(label="📰 Новости", style=discord.ButtonStyle.red)
+    async def news_callback(interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="📰 Новости компании",
+            description="Здесь будет текст новости...",
+            color=discord.Color.red(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="📅 Дата", value=discord.utils.utcnow().strftime("%d.%m.%Y"), inline=True)
+        embed.add_field(name="👤 Автор", value=interaction.user.mention, inline=True)
+        await interaction.channel.send(embed=embed)
+        await interaction.response.send_message("✅ Новости отправлены!", ephemeral=True)
+    news_btn.callback = news_callback
+    view.add_item(news_btn)
+    
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 # --- ЗАПУСК ---
 if __name__ == "__main__":
@@ -434,4 +559,5 @@ if __name__ == "__main__":
         print("❌ Неверный токен! Проверьте токен в файле .env")
     except Exception as e:
         print(f"❌ Ошибка запуска: {e}")
+
 
