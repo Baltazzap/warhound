@@ -425,13 +425,15 @@ async def help_command(ctx):
         color=discord.Color.blue()
     )
     await ctx.send(embed=embed, delete_after=30)
+
 # --- КОМАНДА ОТПРАВКИ СООБЩЕНИЙ ОТ БОТА ---
 class EmbedModal(Modal, title="📝 Создать Embed сообщение"):
     title_input = TextInput(
         label="Заголовок",
         placeholder="Введите заголовок сообщения",
         max_length=256,
-        required=False
+        required=False,
+        default="📢 Объявление"
     )
     description = TextInput(
         label="Описание",
@@ -442,9 +444,10 @@ class EmbedModal(Modal, title="📝 Создать Embed сообщение"):
     )
     color = TextInput(
         label="Цвет (HEX)",
-        placeholder="#FF0000 или оставьте пустым для случайного",
+        placeholder="#3498db или оставьте пустым",
         max_length=7,
-        required=False
+        required=False,
+        default="#3498db"
     )
     footer = TextInput(
         label="Подвал (footer)",
@@ -454,41 +457,62 @@ class EmbedModal(Modal, title="📝 Создать Embed сообщение"):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Проверка прав администратора
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ У вас нет прав администратора!", ephemeral=True)
-            return
-        
-        # Создаём embed
-        embed = discord.Embed(
-            title=self.title_input.value or "📢 Объявление",
-            description=self.description.value,
-            color=discord.Color.random() if not self.color.value else int(self.color.value.replace('#', ''), 16),
-            timestamp=discord.utils.utcnow()
-        )
-        
-        # Добавляем подвал
-        if self.footer.value:
-            embed.set_footer(text=self.footer.value, icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
-        
-        # Добавляем автора (кто отправил)
-        embed.set_author(name=f"Отправлено от: {interaction.user.display_name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
-        
-        # Отправляем в текущий канал
-        await interaction.channel.send(embed=embed)
-        await interaction.response.send_message("✅ Сообщение отправлено!", ephemeral=True)
+        try:
+            # Проверка прав администратора
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message("❌ У вас нет прав администратора!", ephemeral=True)
+                return
+            
+            # Парсим цвет
+            color_value = discord.Color.random()
+            if self.color.value:
+                try:
+                    color_value = int(self.color.value.replace('#', ''), 16)
+                except:
+                    color_value = discord.Color.random()
+            
+            # Создаём embed
+            embed = discord.Embed(
+                title=self.title_input.value or "📢 Объявление",
+                description=self.description.value,
+                color=color_value,
+                timestamp=discord.utils.utcnow()
+            )
+            
+            # Добавляем подвал
+            if self.footer.value:
+                embed.set_footer(text=self.footer.value)
+            
+            # Добавляем автора
+            embed.set_author(
+                name=f"Отправлено: {interaction.user.display_name}",
+                icon_url=interaction.user.avatar.url if interaction.user.avatar else None
+            )
+            
+            # Отправляем в текущий канал
+            await interaction.channel.send(embed=embed)
+            
+            # Отвечаем на взаимодействие
+            await interaction.response.send_message("✅ Сообщение отправлено!", ephemeral=True)
+            
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
-        await interaction.response.send_message(f"❌ Ошибка: {error}", ephemeral=True)
+        try:
+            await interaction.response.send_message(f"❌ Ошибка: {error}", ephemeral=True)
+        except:
+            pass
 
 @tree.command(name="say", description="📢 Отправить сообщение от имени бота (только для админов)")
 async def say(interaction: discord.Interaction):
     """Отправить embed сообщение от имени бота"""
     # Проверка прав
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ У вас нет прав администратора для использования этой команды!", ephemeral=True)
+        await interaction.response.send_message("❌ У вас нет прав администратора!", ephemeral=True)
         return
     
+    # Отправляем модальное окно
     await interaction.response.send_modal(EmbedModal())
 
 @tree.command(name="embed", description="🎨 Расширенное создание embed (для админов)")
@@ -559,5 +583,6 @@ if __name__ == "__main__":
         print("❌ Неверный токен! Проверьте токен в файле .env")
     except Exception as e:
         print(f"❌ Ошибка запуска: {e}")
+
 
 
