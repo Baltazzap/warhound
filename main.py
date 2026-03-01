@@ -439,7 +439,7 @@ class EmbedModal(Modal, title="📝 Создать Embed сообщение"):
         label="Описание",
         style=discord.TextStyle.long,
         placeholder="Основной текст сообщения",
-        max_length=4096,
+        max_length=4000,
         required=True
     )
     color = TextInput(
@@ -583,6 +583,7 @@ if __name__ == "__main__":
         print("❌ Неверный токен! Проверьте токен в файле .env")
     except Exception as e:
         print(f"❌ Ошибка запуска: {e}")
+
 
 
 
