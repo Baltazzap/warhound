@@ -151,6 +151,13 @@ class ApplicationModal(Modal, title="📝 Заявка в компанию"):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
+    print(f"📝 Modal получен от: {interaction.user}")
+    print(f"📝 Title: {self.title_input.value}")
+    print(f"📝 Description length: {len(self.description.value)}")
+    print(f"📝 Color: {self.color.value}")
+    
+    try:
+        
         guild = interaction.guild
         channel = guild.get_channel(APPLY_CHANNEL_ID)
         
@@ -583,6 +590,7 @@ if __name__ == "__main__":
         print("❌ Неверный токен! Проверьте токен в файле .env")
     except Exception as e:
         print(f"❌ Ошибка запуска: {e}")
+
 
 
 
