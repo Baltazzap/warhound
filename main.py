@@ -1119,6 +1119,289 @@ async def servers(interaction: discord.Interaction):
     
     await interaction.followup.send(embed=embed, view=view)
 
+# ============================================
+# 📻 РАДИО TRUCKERSMP
+# ============================================
+RADIO_STATIONS_FILE = "radio_stations.json"
+
+# Стандартные станции TruckersMP
+DEFAULT_STATIONS = {
+    "1": {"name": "TruckersFM", "url": "https://stream.truckers.fm/truckersfm.mp3", "genre": "Talk/Music"},
+    "2": {"name": "ETS2 Radio", "url": "https://stream.ets2radio.com/radio.mp3", "genre": "Music"},
+    "3": {"name": "Radio Hornet", "url": "https://stream.radiohornet.com/radio", "genre": "Rock"},
+    "4": {"name": "LKW Radio", "url": "https://stream.lkw-radio.de/radio.mp3", "genre": "Pop"},
+    "5": {"name": "Trucker Radio", "url": "https://stream.truckerradio.com/live", "genre": "Country"},
+}
+
+def load_radio_stations():
+    """Загрузить список радиостанций"""
+    stations = load_json(RADIO_STATIONS_FILE)
+    if not stations:
+        stations = DEFAULT_STATIONS.copy()
+        save_json(RADIO_STATIONS_FILE, stations)
+    return stations
+
+def save_radio_stations(data):
+    """Сохранить список радиостанций"""
+    save_json(RADIO_STATIONS_FILE, data)
+
+
+# ============================================
+# 🎵 ВОСПРОИЗВЕДЕНИЕ РАДИО
+# ============================================
+@tree.command(name="radio", description="📻 Воспроизвести радио из TruckersMP")
+@app_commands.describe(station="Номер или название станции")
+async def radio(interaction: discord.Interaction, station: str = None):
+    """Воспроизвести радиостанцию"""
+    await interaction.response.defer()
+    
+    # Проверка: пользователь в голосовом канале
+    if not interaction.user.voice:
+        await interaction.followup.send("❌ Вы должны быть в голосовом канале!", ephemeral=True)
+        return
+    
+    user_channel = interaction.user.voice.channel
+    stations = load_radio_stations()
+    
+    # Если станция не указана — показать список
+    if station is None:
+        embed = discord.Embed(
+            title="📻 Доступные радиостанции",
+            description="Выберите станцию: `/radio station:1` или по названию",
+            color=discord.Color.blue(),
+            timestamp=discord.utils.utcnow()
+        )
+        
+        for num, data in stations.items():
+            embed.add_field(
+                name=f"🔹 {num}. {data['name']}",
+                value=f"🎵 {data.get('genre', 'Music')}\n🔗 `{data['url'][:50]}...`",
+                inline=False
+            )
+        
+        embed.set_footer(text="Используйте /radio_add чтобы добавить свою станцию")
+        await interaction.followup.send(embed=embed)
+        return
+    
+    # Поиск станции по номеру или названию
+    selected_station = None
+    station_key = None
+    
+    # Поиск по номеру
+    if station in stations:
+        selected_station = stations[station]
+        station_key = station
+    else:
+        # Поиск по названию
+        for key, data in stations.items():
+            if station.lower() in data['name'].lower():
+                selected_station = data
+                station_key = key
+                break
+    
+    if not selected_station:
+        await interaction.followup.send(f"❌ Станция \"{station}\" не найдена!\nИспользуйте `/radio` для просмотра списка.", ephemeral=True)
+        return
+    
+    # Подключение к голосовому каналу
+    try:
+        voice_client = await user_channel.connect()
+        
+        # Если уже играет — остановить
+        if voice_client.is_playing():
+            voice_client.stop()
+        
+        # Воспроизведение потока
+        ffmpeg_options = {
+            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+            'options': '-vn'
+        }
+        
+        source = discord.FFmpegPCMAudio(selected_station['url'], **ffmpeg_options)
+        voice_client.play(source)
+        
+        embed = discord.Embed(
+            title="📻 Сейчас играет",
+            description=f"**{selected_station['name']}**\n\n🎵 {selected_station.get('genre', 'Music')}",
+            color=discord.Color.green(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="🔊 Канал", value=user_channel.mention, inline=True)
+        embed.add_field(name="👥 Слушателей", value=str(len(user_channel.members)), inline=True)
+        embed.set_footer(text=f"Станция #{station_key} | Для остановки: /radio_stop")
+        
+        # Кнопки управления
+        view = View()
+        
+        stop_btn = Button(label="⏹️ Стоп", style=discord.ButtonStyle.red)
+        async def stop_callback(inter: discord.Interaction):
+            if inter.guild.voice_client:
+                await inter.guild.voice_client.disconnect()
+                await inter.response.send_message("⏹️ Радио остановлено!", ephemeral=True)
+            else:
+                await inter.response.send_message("❌ Радио не играет!", ephemeral=True)
+        stop_btn.callback = stop_callback
+        view.add_item(stop_btn)
+        
+        await interaction.followup.send(embed=embed, view=view)
+        
+    except Exception as e:
+        print(f"❌ Ошибка воспроизведения: {e}")
+        await interaction.followup.send(f"❌ Ошибка воспроизведения: {e}", ephemeral=True)
+
+
+@tree.command(name="radio_stop", description="⏹️ Остановить радио")
+async def radio_stop(interaction: discord.Interaction):
+    """Остановить воспроизведение радио"""
+    await interaction.response.defer()
+    
+    if interaction.guild.voice_client:
+        await interaction.guild.voice_client.disconnect()
+        await interaction.followup.send("⏹️ Радио остановлено!", ephemeral=True)
+    else:
+        await interaction.followup.send("❌ Радио не играет!", ephemeral=True)
+
+
+@tree.command(name="radio_add", description="➕ Добавить свою радиостанцию (админ)")
+@app_commands.describe(
+    name="Название станции",
+    url="Ссылка на поток (mp3/aac)",
+    genre="Жанр музыки"
+)
+async def radio_add(interaction: discord.Interaction, name: str, url: str, genre: str = "Music"):
+    """Добавить пользовательскую радиостанцию"""
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Только для администрации!", ephemeral=True)
+        return
+    
+    # Проверка URL
+    if not url.startswith(("http://", "https://")):
+        await interaction.response.send_message("❌ URL должен начинаться с http:// или https://", ephemeral=True)
+        return
+    
+    stations = load_radio_stations()
+    new_id = str(len(stations) + 1)
+    
+    stations[new_id] = {
+        "name": name,
+        "url": url,
+        "genre": genre,
+        "added_by": str(interaction.user.id),
+        "added_at": datetime.now().isoformat()
+    }
+    
+    save_radio_stations(stations)
+    
+    embed = discord.Embed(
+        title="➕ Станция добавлена!",
+        description=f"**{name}**\n\n🔗 `{url}`\n🎵 {genre}",
+        color=discord.Color.green()
+    )
+    embed.set_footer(text=f"ID станции: {new_id} | Используйте /radio {new_id} для воспроизведения")
+    
+    await interaction.response.send_message(embed=embed)
+
+
+@tree.command(name="radio_list", description="📋 Показать все радиостанции")
+async def radio_list(interaction: discord.Interaction):
+    """Показать список всех радиостанций"""
+    await interaction.response.defer()
+    
+    stations = load_radio_stations()
+    
+    embed = discord.Embed(
+        title="📻 Все радиостанции",
+        description=f"Всего станций: **{len(stations)}**",
+        color=discord.Color.blue(),
+        timestamp=discord.utils.utcnow()
+    )
+    
+    for num, data in stations.items():
+        added_info = ""
+        if "added_by" in data:
+            user = interaction.guild.get_member(int(data["added_by"]))
+            if user:
+                added_info = f"\n➕ Добавил: {user.display_name}"
+        
+        embed.add_field(
+            name=f"🔹 {num}. {data['name']}",
+            value=f"🎵 {data.get('genre', 'Music')}\n🔗 `{data['url'][:40]}...`{added_info}",
+            inline=False
+        )
+    
+    embed.set_footer(text="Используйте /radio <номер> для воспроизведения")
+    
+    await interaction.followup.send(embed=embed)
+
+
+@tree.command(name="radio_remove", description="❌ Удалить радиостанцию (админ)")
+@app_commands.describe(station_id="ID или название станции")
+async def radio_remove(interaction: discord.Interaction, station_id: str):
+    """Удалить радиостанцию"""
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Только для администрации!", ephemeral=True)
+        return
+    
+    stations = load_radio_stations()
+    
+    # Поиск станции
+    if station_id in stations:
+        removed = stations.pop(station_id)
+        save_radio_stations(stations)
+        
+        embed = discord.Embed(
+            title="❌ Станция удалена",
+            description=f"**{removed['name']}**",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed)
+    else:
+        # Поиск по названию
+        found = False
+        for key, data in stations.items():
+            if station_id.lower() in data['name'].lower():
+                removed = stations.pop(key)
+                save_radio_stations(stations)
+                found = True
+                
+                embed = discord.Embed(
+                    title="❌ Станция удалена",
+                    description=f"**{removed['name']}**",
+                    color=discord.Color.red()
+                )
+                await interaction.response.send_message(embed=embed)
+                break
+        
+        if not found:
+            await interaction.response.send_message(f"❌ Станция \"{station_id}\" не найдена!", ephemeral=True)
+
+
+@tree.command(name="radio_now", description="🎵 Что сейчас играет?")
+async def radio_now(interaction: discord.Interaction):
+    """Показать текущую воспроизводимую станцию"""
+    await interaction.response.defer()
+    
+    if not interaction.guild.voice_client or not interaction.guild.voice_client.is_playing():
+        await interaction.followup.send("❌ Сейчас ничего не играет!", ephemeral=True)
+        return
+    
+    voice_channel = interaction.guild.voice_client.channel
+    
+    embed = discord.Embed(
+        title="📻 Сейчас играет",
+        description=f"🔊 **{voice_channel.name}**\n\n👥 Слушателей: {len(voice_channel.members)}",
+        color=discord.Color.green(),
+        timestamp=discord.utils.utcnow()
+    )
+    
+    # Список слушателей
+    members_list = ", ".join([m.display_name for m in voice_channel.members[:5]])
+    if len(voice_channel.members) > 5:
+        members_list += f" и ещё {len(voice_channel.members) - 5}..."
+    
+    embed.add_field(name="👥 Слушают", value=members_list, inline=False)
+    
+    await interaction.followup.send(embed=embed)
 
 # ============================================
 # 🖥️ СТАТУС СЕРВЕРА (ОБНОВЛЁННАЯ)
@@ -1263,5 +1546,6 @@ if __name__ == "__main__":
         print("❌ Неверный токен!")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
+
 
 
