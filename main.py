@@ -1334,9 +1334,9 @@ class VerifyButton(Button):
             await interaction.user.add_roles(role)
             await interaction.response.send_message(
                 f"{interaction.user.mention}, верификация пройдена! 🐺⚡\n"
-                f"📊 Проверьте свой уровень: `/level`\n"
+                f"📊 Проверьте свой профиль: `/level`\n"
                 f"💬 Установите статус: `/status`\n"
-                f"📻 Включите радио: `/radio`",
+                f"📻 Включите радио (Временно не работает): `/radio`",
                 ephemeral=True
             )
         else:
@@ -1480,10 +1480,8 @@ async def on_member_join(member):
         embed.add_field(
             name="✅ Первые шаги:",
             value="1. `/verify` - верификация\n"
-                  "2. Заявка: https://hub.truckyapp.com/vtc/warhound-logistics/apply\n"
-                  "3. `/level` - проверить уровень\n"
-                  "4. `/status` - установить статус\n"
-                  "5. `/radio` - включить радио",
+                  "2. Отправь Заявку: https://hub.truckyapp.com/vtc/warhound-logistics/apply\n"
+                  "3. Дождись одобрения твоей заявки менеджерами.",
             inline=False
         )
         embed.set_footer(text="🔥 «Беги со стаей»")
@@ -1500,3 +1498,4 @@ if __name__ == "__main__":
         print("❌ Неверный токен!")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
+
