@@ -8,9 +8,6 @@ import json
 import aiohttp
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
-import io
-import math
 
 # Загрузка токена из .env файла
 load_dotenv()
@@ -49,12 +46,12 @@ VOICE_ACTIVITY_FILE = "voice_activity.json"
 MAX_LEVEL = 150
 XP_PER_MESSAGE = 15
 XP_PER_10MIN_VOICE = 100
-MESSAGE_COOLDOWN = 60  # секунд между начислением XP за сообщения
+MESSAGE_COOLDOWN = 60
 
 # Словари для отслеживания
 user_channels = {}
 message_cooldowns = {}
-voice_activity = {}  # {user_id: {"start_time": timestamp, "total_minutes": int}}
+voice_activity = {}
 
 
 # ============================================
@@ -73,10 +70,6 @@ def save_json(filename, data):
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-
-# ============================================
-# 🎖️ СИСТЕМА УРОВНЕЙ
-# ============================================
 def load_levels():
     return load_json(LEVELS_FILE)
 
@@ -90,25 +83,21 @@ def save_voice_activity(data):
     save_json(VOICE_ACTIVITY_FILE, data)
 
 def get_xp_for_level(level):
-    """XP необходимый для уровня"""
     return int(level ** 2 * 100)
 
 def get_total_xp_for_level(level):
-    """Общий XP для достижения уровня"""
     total = 0
     for i in range(1, level + 1):
         total += get_xp_for_level(i)
     return total
 
 def get_level_from_xp(total_xp):
-    """Определить уровень по общему XP"""
     level = 1
     while get_total_xp_for_level(level) <= total_xp and level < MAX_LEVEL:
         level += 1
     return level
 
 def get_xp_progress(total_xp):
-    """Вернуть текущий уровень, прогресс и следующий уровень"""
     level = get_level_from_xp(total_xp)
     
     if level >= MAX_LEVEL:
@@ -123,7 +112,6 @@ def get_xp_progress(total_xp):
     return level, progress, required, percentage
 
 def add_xp(user_id, amount):
-    """Добавить XP пользователю"""
     levels = load_levels()
     user_id = str(user_id)
     
@@ -138,189 +126,7 @@ def add_xp(user_id, amount):
 
 
 # ============================================
-# 📥 ЗАГРУЗКА ШРИФТА (ПРОСТАЯ)
-# ============================================
-import urllib.request
-import os
-
-FONT_FILE = "font.ttf"
-
-if not os.path.exists(FONT_FILE):
-    print("⏳ Загружаю шрифт...")
-    try:
-        url = "https://raw.githubusercontent.com/google/fonts/main/apache/roboto/Roboto-Bold.ttf"
-        urllib.request.urlretrieve(url, FONT_FILE)
-        print("✅ Шрифт загружен!")
-    except Exception as e:
-        print(f"⚠️ Ошибка загрузки шрифта: {e}")
-        FONT_FILE = None
-
-
-# ============================================
-# 🖼️ ГЕНЕРАЦИЯ КАРТОЧКИ (v5.0 - ИСПРАВЛЕННАЯ)
-# ============================================
-async def create_level_card(user: discord.Member, level_data: dict):
-    """Создать карточку уровня"""
-    
-    # Размеры
-    WIDTH = 1000
-    HEIGHT = 400
-    
-    # Создаём изображение
-    img = Image.new('RGBA', (WIDTH, HEIGHT), (40, 30, 80, 255))
-    draw = ImageDraw.Draw(img)
-    
-    # === ЗАГРУЗКА ШРИФТОВ ===
-    def get_font(size):
-        if FONT_FILE and os.path.exists(FONT_FILE):
-            try:
-                return ImageFont.truetype(FONT_FILE, size)
-            except:
-                pass
-        try:
-            return ImageFont.truetype("arial.ttf", size)
-        except:
-            return ImageFont.load_default()
-    
-    font_title = get_font(48)    # Заголовок
-    font_stat = get_font(36)     # Статистика
-    font_small = get_font(24)    # Мелкий текст
-    
-    # === ФОН ===
-    # Градиент
-    for y in range(HEIGHT):
-        ratio = y / HEIGHT
-        r = int(40 + ratio * 10)
-        g = int(30 + ratio * 8)
-        b = int(80 + ratio * 20)
-        draw.rectangle([0, y, WIDTH, y+1], fill=(r, g, b, 255))
-    
-    # === АВАТАРКА ===
-    avatar_size = 240
-    avatar_x = 40
-    avatar_y = (HEIGHT - avatar_size) // 2  # Центрируем по вертикали
-    
-    try:
-        avatar_url = user.avatar.url if user.avatar else user.default_avatar.url
-        async with aiohttp.ClientSession() as session:
-            async with session.get(avatar_url) as resp:
-                avatar_data = await resp.read()
-        
-        avatar = Image.open(io.BytesIO(avatar_data)).convert('RGBA')
-        avatar = avatar.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
-        
-        # Круглая маска
-        mask = Image.new('L', (avatar_size, avatar_size), 0)
-        ImageDraw.Draw(mask).ellipse([0, 0, avatar_size, avatar_size], fill=255)
-        avatar.putalpha(mask)
-        
-        # Тень
-        for i in range(4, 0, -1):
-            shadow = Image.new('RGBA', (avatar_size + i*2, avatar_size + i*2), (0, 0, 0, 0))
-            ImageDraw.Draw(shadow).ellipse([0, 0, avatar_size + i*2, avatar_size + i*2], fill=(0, 0, 0, int(80/i)))
-            img.paste(shadow, (avatar_x - i, avatar_y - i), shadow)
-        
-        # Аватарка
-        img.paste(avatar, (avatar_x, avatar_y), avatar)
-        
-        # Золотая рамка
-        draw.ellipse([avatar_x - 3, avatar_y - 3, avatar_x + avatar_size + 3, avatar_y + avatar_size + 3], 
-                    outline=(255, 215, 0), width=4)
-        
-    except Exception as e:
-        print(f"⚠️ Ошибка аватарки: {e}")
-        draw.ellipse([avatar_x, avatar_y, avatar_x + avatar_size, avatar_y + avatar_size], 
-                    fill=(80, 70, 100))
-        draw.ellipse([avatar_x - 3, avatar_y - 3, avatar_x + avatar_size + 3, avatar_y + avatar_size + 3], 
-                    outline=(255, 215, 0), width=4)
-    
-    # === ДАННЫЕ ===
-    level = level_data.get("level", 1)
-    messages = level_data.get("messages", 0)
-    voice_mins = level_data.get("voice_minutes", 0)
-    total_xp = level_data.get("xp", 0)
-    
-    hours = voice_mins // 60
-    mins = voice_mins % 60
-    lvl, progress, required, percentage = get_xp_progress(total_xp)
-    
-    # === ТЕКСТ (ВЫРАВНИВАНИЕ) ===
-    text_start_x = avatar_x + avatar_size + 40  # Отступ от аватарки
-    text_start_y = 80  # Отступ сверху
-    
-    # Никнейм (48px - БОЛЬШОЙ)
-    nickname = user.display_name[:28]
-    draw.text((text_start_x, text_start_y), nickname, fill=(255, 255, 255), font=font_title)
-    
-    # Уровень (36px)
-    level_text = f"👑 MAX LEVEL" if level >= MAX_LEVEL else f"⭐ Level {level}"
-    draw.text((text_start_x, text_start_y + 60), level_text, fill=(255, 215, 0), font=font_stat)
-    
-    # Разделительная линия
-    line_y = text_start_y + 110
-    draw.line([(text_start_x, line_y), (WIDTH - 40, line_y)], fill=(100, 100, 130), width=2)
-    
-    # Статистика (36px) - РОВНО ПО ЛИНИИ
-    stat_y = line_y + 30
-    stat_spacing = 45
-    label_width = 180  # Ширина для лейблов
-    
-    # Сообщения
-    draw.text((text_start_x, stat_y), "Messages:", fill=(180, 180, 180), font=font_stat)
-    draw.text((text_start_x + label_width, stat_y), f"{messages:,}", fill=(255, 255, 255), font=font_stat)
-    
-    # Голос
-    draw.text((text_start_x, stat_y + stat_spacing), "Voice Time:", fill=(180, 180, 180), font=font_stat)
-    draw.text((text_start_x + label_width, stat_y + stat_spacing), f"{hours}h {mins}m", fill=(255, 255, 255), font=font_stat)
-    
-    # XP
-    draw.text((text_start_x, stat_y + stat_spacing * 2), "Total XP:", fill=(180, 180, 180), font=font_stat)
-    draw.text((text_start_x + label_width, stat_y + stat_spacing * 2), f"{total_xp:,}", fill=(255, 255, 255), font=font_stat)
-    
-    # === ПРОГРЕСС БАР ===
-    bar_x = text_start_x
-    bar_y = HEIGHT - 70
-    bar_width = WIDTH - text_start_x - 40
-    bar_height = 35
-    
-    # Фон бара
-    draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_width, bar_y + bar_height], radius=18, fill=(25, 25, 45))
-    
-    # Заполнение
-    if required > 0 and level < MAX_LEVEL:
-        fill_width = int(bar_width * (progress / required))
-        if fill_width > 0:
-            # Градиент
-            for i in range(fill_width):
-                ratio = i / fill_width
-                r = int(100 + ratio * 155)
-                g = int(100 + ratio * 155)
-                b = int(200 + ratio * 55)
-                draw.rectangle([bar_x + i, bar_y + 3, bar_x + i + 1, bar_y + bar_height - 3], fill=(r, g, b))
-    
-    # Текст прогресса
-    if level < MAX_LEVEL:
-        progress_text = f"{progress:,} / {required:,} XP ({percentage}%)"
-    else:
-        progress_text = "MAXIMUM REACHED"
-    
-    draw.text((bar_x + bar_width + 10, bar_y + 8), progress_text, fill=(255, 255, 255), font=font_small)
-    
-    # === РАМКА ===
-    draw.rectangle([0, 0, WIDTH-1, HEIGHT-1], outline=(100, 100, 130), width=3)
-    
-    # === ЛОГОТИП ===
-    draw.text((WIDTH - 200, HEIGHT - 25), "Warhound", fill=(120, 120, 150), font=font_small)
-    
-    # === СОХРАНЕНИЕ ===
-    buffer = io.BytesIO()
-    img.save(buffer, format='PNG')
-    buffer.seek(0)
-    
-    return buffer
-
-# ============================================
-# ️ КОМАНДЫ УРОВНЕЙ
+# 🎖️ КОМАНДЫ УРОВНЕЙ (EMBED)
 # ============================================
 @tree.command(name="level", description="🎖️ Показать свой уровень")
 @app_commands.describe(member="Участник для просмотра (по умолчанию - вы)")
@@ -333,32 +139,81 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
     
     level_data = levels.get(user_id, {"xp": 0, "messages": 0, "voice_minutes": 0, "level": 1})
     
-    # Генерируем карточку
-    try:
-        card_buffer = await create_level_card(target, level_data)
-        file = discord.File(card_buffer, filename=f"level_{target.id}.png")
+    level = level_data.get("level", 1)
+    messages = level_data.get("messages", 0)
+    voice_mins = level_data.get("voice_minutes", 0)
+    total_xp = level_data.get("xp", 0)
+    
+    hours = voice_mins // 60
+    mins = voice_mins % 60
+    
+    lvl, progress, required, percentage = get_xp_progress(total_xp)
+    
+    # Цвет embed по уровню
+    if level >= 100:
+        color = discord.Color.gold()
+        level_emoji = "👑"
+    elif level >= 50:
+        color = discord.Color.purple()
+        level_emoji = "⭐"
+    else:
+        color = discord.Color.blue()
+        level_emoji = "🔹"
+    
+    embed = discord.Embed(
+        title=f"🎖️ Профиль: {target.display_name}",
+        description=f"**{level_emoji} Уровень {level}** {'| МАКСИМАЛЬНЫЙ УРОВЕНЬ!' if level >= MAX_LEVEL else ''}",
+        color=color,
+        timestamp=discord.utils.utcnow()
+    )
+    
+    # Аватарка
+    embed.set_thumbnail(url=target.avatar.url if target.avatar else target.default_avatar.url)
+    
+    # Статистика
+    embed.add_field(
+        name="📊 Статистика",
+        value=f"💬 **Сообщений:** {messages:,}\n"
+              f"🎤 **В голосе:** {hours}ч {mins}м\n"
+              f"⭐ **Всего XP:** {total_xp:,}",
+        inline=False
+    )
+    
+    # Прогресс бар
+    if level < MAX_LEVEL:
+        bar_length = 10
+        filled = int(bar_length * (progress / required))
+        empty = bar_length - filled
+        progress_bar = "▓" * filled + "░" * empty
         
-        await interaction.followup.send(file=file)
-    except Exception as e:
-        print(f"❌ Ошибка генерации: {e}")
-        
-        # Текстовая версия (запасной вариант)
-        lvl, progress, required, percentage = get_xp_progress(level_data.get("xp", 0))
-        hours = level_data.get("voice_minutes", 0) // 60
-        mins = level_data.get("voice_minutes", 0) % 60
-        
-        embed = discord.Embed(
-            title=f"🎖️ Уровень: {target.display_name}",
-            description=f"**Уровень {lvl}**\n\n"
-                       f"💬 **Сообщений:** {level_data.get('messages', 0):,}\n"
-                       f"🎤 **В голосе:** {hours}ч {mins}м\n"
-                       f"⭐ **XP:** {progress:,} / {required:,} ({percentage}%)\n"
-                       f"📊 **Всего XP:** {level_data.get('xp', 0):,}",
-            color=discord.Color.gold()
+        embed.add_field(
+            name="📈 Прогресс",
+            value=f"```[{progress_bar}] {percentage}%```\n"
+                  f"**{progress:,}** / **{required:,} XP**",
+            inline=False
         )
-        embed.set_thumbnail(url=target.avatar.url if target.avatar else target.default_avatar.url)
-        
-        await interaction.followup.send(embed=embed)
+    else:
+        embed.add_field(
+            name="📈 Прогресс",
+            value=f"```[{'▓' * 10}] 100%```\n"
+                  f"**🏆 МАКСИМАЛЬНЫЙ УРОВЕНЬ**",
+            inline=False
+        )
+    
+    # Ранг
+    all_levels = load_levels()
+    sorted_levels = sorted(all_levels.items(), key=lambda x: x[1].get("level", 1), reverse=True)
+    user_rank = next((i + 1 for i, (uid, _) in enumerate(sorted_levels) if uid == user_id), len(sorted_levels) + 1)
+    
+    embed.add_field(
+        name="🏆 Место в топе",
+        value=f"**#{user_rank}** из {len(sorted_levels)} участников",
+        inline=False
+    )
+    
+    embed.set_footer(text=f"ID: {target.id} | Warhound Logistics", icon_url=target.avatar.url if target.avatar else None)
+    
+    await interaction.followup.send(embed=embed)
 
 
 @tree.command(name="leaderboard", description="🏆 Топ участников по уровням")
@@ -372,30 +227,70 @@ async def leaderboard(interaction: discord.Interaction):
         await interaction.followup.send("📭 Пока нет данных!", ephemeral=True)
         return
     
-    # Сортировка по уровню
-    sorted_levels = sorted(levels.items(), key=lambda x: x[1].get("level", 1), reverse=True)[:10]
+    sorted_levels = sorted(levels.items(), key=lambda x: x[1].get("level", 1), reverse=True)[:15]
     
     embed = discord.Embed(
         title="🏆 Топ участников Warhound Logistics",
-        description="🎖️ По уровню активности",
+        description="🎖️ Рейтинг по уровню активности",
         color=discord.Color.gold(),
         timestamp=discord.utils.utcnow()
     )
     
     for i, (user_id, data) in enumerate(sorted_levels, 1):
-        medal = ["🥇", "🥈", "🥉"][i-1] if i <= 3 else f"{i}."
+        medal = ["🥇", "🥈", "🥉"][i-1] if i <= 3 else f"**{i}.**"
         user = guild.get_member(int(user_id))
         name = user.display_name if user else f"Участник#{user_id[-4:]}"
         
+        lvl = data.get("level", 1)
+        msgs = data.get("messages", 0)
+        voice = data.get("voice_minutes", 0)
+        
+        level_emoji = "👑" if lvl >= MAX_LEVEL else "⭐" if lvl >= 50 else "🔹"
+        
         embed.add_field(
             name=f"{medal} {name}",
-            value=f"🎖️ Уровень {data.get('level', 1)}\n"
-                  f"💬 {data.get('messages', 0):,} сообщений\n"
-                  f"🎤 {data.get('voice_minutes', 0)} мин в голосе",
-            inline=False
+            value=f"{level_emoji} **Уровень {lvl}**\n"
+                  f"💬 {msgs:,} сообщений\n"
+                  f"🎤 {voice} мин в голосе",
+            inline=True
         )
     
     embed.set_footer(text="Активность = сообщения + голосовое время")
+    
+    await interaction.followup.send(embed=embed)
+
+
+@tree.command(name="progress", description="📊 Быстрый просмотр прогресса")
+async def progress(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
+    user_id = str(interaction.user.id)
+    levels = load_levels()
+    level_data = levels.get(user_id, {"xp": 0, "messages": 0, "voice_minutes": 0, "level": 1})
+    
+    level = level_data.get("level", 1)
+    total_xp = level_data.get("xp", 0)
+    messages = level_data.get("messages", 0)
+    
+    lvl, prog, required, percentage = get_xp_progress(total_xp)
+    
+    bar_length = 20
+    filled = int(bar_length * (percentage / 100))
+    empty = bar_length - filled
+    progress_bar = "▓" * filled + "░" * empty
+    
+    embed = discord.Embed(
+        title=f"📊 Прогресс: {interaction.user.display_name}",
+        description=f"```[{progress_bar}] {percentage}%```",
+        color=discord.Color.blue(),
+        timestamp=discord.utils.utcnow()
+    )
+    
+    embed.add_field(name="Текущий уровень", value=f"**{level}**", inline=True)
+    embed.add_field(name="До следующего", value=f"**{required - prog:,} XP**", inline=True)
+    embed.add_field(name="Сообщений", value=f"**{messages:,}**", inline=True)
+    
+    embed.set_footer(text="Продолжайте общаться и будьте в голосе!")
     
     await interaction.followup.send(embed=embed)
 
@@ -465,28 +360,50 @@ async def on_message(message):
 async def on_voice_state_update(member, before, after):
     user_id = str(member.id)
     now = datetime.now()
+    guild = member.guild
     
-    # Пользователь зашёл в голосовой канал
+    # Авто-создание голосовых каналов
+    if after.channel and after.channel.id == VOICE_TEMPLATE_CHANNEL_ID:
+        category = guild.get_channel(VOICE_CATEGORY_ID) if VOICE_CATEGORY_ID else None
+        
+        try:
+            new_channel = await guild.create_voice_channel(
+                name=f"🚛 {member.display_name}",
+                category=category,
+                reason="Авто-создание канала для колонны"
+            )
+            await member.move_to(new_channel)
+            user_channels[member.id] = new_channel.id
+        except Exception as e:
+            print(f"Ошибка создания канала: {e}")
+
+    # Удаление пустых каналов
+    if before.channel and before.channel.id in user_channels.values():
+        if len(before.channel.members) == 0:
+            try:
+                await before.channel.delete(reason="Канал пуст")
+                user_ids = [uid for uid, cid in user_channels.items() if cid == before.channel.id]
+                for uid in user_ids:
+                    del user_channels[uid]
+            except Exception as e:
+                print(f"Ошибка удаления канала: {e}")
+    
+    # Отслеживание голосовой активности для XP
     if after.channel and not before.channel:
         voice_activity[user_id] = {
             "start_time": now.timestamp(),
-            "total_minutes": 0,
             "last_activity": now.timestamp(),
-            "is_speaking": False
+            "is_speaking": not after.self_mute and not after.self_deaf
         }
-    
-    # Пользователь вышел из голосового канала
     elif not after.channel and before.channel:
         if user_id in voice_activity:
             activity = voice_activity[user_id]
             minutes = int((now.timestamp() - activity["start_time"]) / 60)
             
-            # Начисление XP за голосовое время
             if minutes >= 10:
                 xp_earned = (minutes // 10) * XP_PER_10MIN_VOICE
                 add_xp(user_id, xp_earned)
                 
-                # Сохранение в общую статистику
                 levels = load_levels()
                 if user_id not in levels:
                     levels[user_id] = {"xp": 0, "messages": 0, "voice_minutes": 0, "level": 1}
@@ -495,20 +412,15 @@ async def on_voice_state_update(member, before, after):
             
             del voice_activity[user_id]
     
-    # Обновление активности (для проверки AFK)
     if after.channel and user_id in voice_activity:
         voice_activity[user_id]["last_activity"] = now.timestamp()
         voice_activity[user_id]["is_speaking"] = not after.self_mute and not after.self_deaf
 
 
-# Проверка AFK в голосовых каналах
 @tasks.loop(minutes=5)
 async def check_voice_afk():
-    """Проверка неактивных пользователей в голосовых каналах"""
     now = datetime.now().timestamp()
-    
     for user_id, activity in list(voice_activity.items()):
-        # Если не было активности 5 минут - считаем AFK
         if now - activity["last_activity"] > 300:
             activity["is_speaking"] = False
 
@@ -646,6 +558,7 @@ def load_tickets():
 def save_tickets(data):
     save_json(TICKETS_FILE, data)
 
+
 class TicketSelect(Select):
     def __init__(self):
         super().__init__(
@@ -726,6 +639,16 @@ async def close_ticket(ctx):
     await ctx.channel.delete()
 
 
+@bot.command(name="add")
+async def add_to_ticket(ctx, member: discord.Member):
+    if "тикет-" not in ctx.channel.name:
+        await ctx.send("❌ Только для тикетов!", delete_after=5)
+        return
+    
+    await ctx.channel.set_permissions(member, view_channel=True, send_messages=True)
+    await ctx.send(f"✅ {member.mention} добавлен в тикет!", delete_after=5)
+
+
 # ============================================
 # 📅 РАСПИСАНИЕ
 # ============================================
@@ -737,7 +660,7 @@ def save_schedules(data):
 
 
 @tree.command(name="add_schedule", description="📅 Добавить рейс (админ)")
-@app_commands.describe(title="Название", start_time="Время (ДД.ММ ЧЧ:ММ)", route="Маршрут")
+@app_commands.describe(title="Название", start_time="Время (ДД.ММ ЧЧ:ММ)", route="Маршрут", description="Описание")
 async def add_schedule(interaction: discord.Interaction, title: str, start_time: str, route: str, description: str = ""):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ Только админам!", ephemeral=True)
@@ -964,67 +887,6 @@ async def verify(interaction: discord.Interaction):
 # ============================================
 # 🎤 ГОЛОСОВЫЕ КАНАЛЫ
 # ============================================
-@bot.event
-async def on_voice_state_update(member, before, after):
-    guild = member.guild
-    
-    # Авто-создание каналов
-    if after.channel and after.channel.id == VOICE_TEMPLATE_CHANNEL_ID:
-        category = guild.get_channel(VOICE_CATEGORY_ID) if VOICE_CATEGORY_ID else None
-        
-        try:
-            new_channel = await guild.create_voice_channel(
-                name=f"🚛 {member.display_name}",
-                category=category
-            )
-            await member.move_to(new_channel)
-            user_channels[member.id] = new_channel.id
-        except Exception as e:
-            print(f"Ошибка: {e}")
-
-    # Удаление пустых каналов
-    if before.channel and before.channel.id in user_channels.values():
-        if len(before.channel.members) == 0:
-            try:
-                await before.channel.delete()
-                user_ids = [uid for uid, cid in user_channels.items() if cid == before.channel.id]
-                for uid in user_ids:
-                    del user_channels[uid]
-            except Exception as e:
-                print(f"Ошибка: {e}")
-    
-    # Отслеживание голосовой активности для XP
-    user_id = str(member.id)
-    now = datetime.now()
-    
-    if after.channel and not before.channel:
-        voice_activity[user_id] = {
-            "start_time": now.timestamp(),
-            "last_activity": now.timestamp(),
-            "is_speaking": not after.self_mute
-        }
-    elif not after.channel and before.channel:
-        if user_id in voice_activity:
-            activity = voice_activity[user_id]
-            minutes = int((now.timestamp() - activity["start_time"]) / 60)
-            
-            if minutes >= 10:
-                xp_earned = (minutes // 10) * XP_PER_10MIN_VOICE
-                add_xp(user_id, xp_earned)
-                
-                levels = load_levels()
-                if user_id not in levels:
-                    levels[user_id] = {"xp": 0, "messages": 0, "voice_minutes": 0, "level": 1}
-                levels[user_id]["voice_minutes"] += minutes
-                save_levels(levels)
-            
-            del voice_activity[user_id]
-    
-    if after.channel and user_id in voice_activity:
-        voice_activity[user_id]["last_activity"] = now.timestamp()
-        voice_activity[user_id]["is_speaking"] = not after.self_mute and not after.self_deaf
-
-
 @bot.command(name="rename")
 async def rename_channel(ctx, *, name: str):
     if not ctx.author.voice:
@@ -1089,13 +951,14 @@ async def ping(interaction: discord.Interaction):
 @bot.command(name="help")
 async def help_command(ctx):
     embed = discord.Embed(title="📚 Команды Warhound Logistics", color=discord.Color.blue())
-    embed.add_field(name="🎖️ Уровни", value="`/level` - Моя карточка\n`/leaderboard` - Топ", inline=False)
+    embed.add_field(name="🎖️ Уровни", value="`/level` - Моя карточка\n`/leaderboard` - Топ\n`/progress` - Прогресс", inline=False)
     embed.add_field(name="🔐 Верификация", value="`/verify` - Подтвердить аккаунт", inline=False)
-    embed.add_field(name="🎂 Дни рождения", value="`/birthday` - Установить дату", inline=False)
+    embed.add_field(name="🎂 Дни рождения", value="`/birthday` - Установить дату\n`/birthdays` - Список ДР", inline=False)
     embed.add_field(name="🎫 Поддержка", value="`/ticket` - Создать тикет", inline=False)
     embed.add_field(name="📅 Рейсы", value="`/schedule` - Рейсы\n`/add_schedule` - Добавить (админ)", inline=False)
-    embed.add_field(name="📸 Конкурсы", value="`/create_contest` - Конкурс (админ)", inline=False)
+    embed.add_field(name="📸 Конкурсы", value="`/create_contest` - Конкурс (админ)\n`/end_contest` - Завершить (админ)", inline=False)
     embed.add_field(name="🖥️ Сервер", value="`/server` - Статус сервера", inline=False)
+    embed.add_field(name="📢 Админ", value="`/say` - Отправить embed\n`/reset_level` - Сброс уровня", inline=False)
     embed.add_field(name="🎤 Голосовые", value="`!rename/limit/lock/unlock/delete`", inline=False)
     
     await ctx.send(embed=embed, delete_after=60)
@@ -1110,7 +973,7 @@ async def on_ready():
         synced = await tree.sync()
         print(f'✅ Синхронизировано {len(synced)} команд')
     except Exception as e:
-        print(f'❌ Ошибка: {e}')
+        print(f'❌ Ошибка синхронизации: {e}')
     
     check_birthdays.start()
     check_server_status.start()
@@ -1154,9 +1017,3 @@ if __name__ == "__main__":
         print("❌ Неверный токен!")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
-
-
-
-
-
-
