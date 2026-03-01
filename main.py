@@ -8,6 +8,9 @@ import json
 import aiohttp
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
+import io
+import math
 
 # Загрузка токена из .env файла
 load_dotenv()
@@ -34,21 +37,30 @@ PHOTO_CONTEST_CHANNEL_ID = 1477003982919700553
 ETS2_SERVER_IP = "127.0.0.1"
 ETS2_SERVER_PORT = 27015
 
-# --- JSON ФАЙЛЫ ДЛЯ ХРАНЕНИЯ ДАННЫХ ---
+# --- JSON ФАЙЛЫ ---
 BIRTHDAYS_FILE = "birthdays.json"
 SCHEDULES_FILE = "schedules.json"
 TICKETS_FILE = "tickets.json"
 CONTESTS_FILE = "contests.json"
+LEVELS_FILE = "levels.json"
+VOICE_ACTIVITY_FILE = "voice_activity.json"
 
-# Словарь для голосовых каналов
+# --- НАСТРОЙКИ УРОВНЕЙ ---
+MAX_LEVEL = 150
+XP_PER_MESSAGE = 15
+XP_PER_10MIN_VOICE = 100
+MESSAGE_COOLDOWN = 60  # секунд между начислением XP за сообщения
+
+# Словари для отслеживания
 user_channels = {}
+message_cooldowns = {}
+voice_activity = {}  # {user_id: {"start_time": timestamp, "total_minutes": int}}
 
 
 # ============================================
 # 📁 ФУНКЦИИ ДЛЯ РАБОТЫ С JSON
 # ============================================
 def load_json(filename):
-    """Загрузить данные из JSON файла"""
     if os.path.exists(filename):
         try:
             with open(filename, "r", encoding="utf-8") as f:
@@ -58,9 +70,374 @@ def load_json(filename):
     return {}
 
 def save_json(filename, data):
-    """Сохранить данные в JSON файл"""
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+# ============================================
+# 🎖️ СИСТЕМА УРОВНЕЙ
+# ============================================
+def load_levels():
+    return load_json(LEVELS_FILE)
+
+def save_levels(data):
+    save_json(LEVELS_FILE, data)
+
+def load_voice_activity():
+    return load_json(VOICE_ACTIVITY_FILE)
+
+def save_voice_activity(data):
+    save_json(VOICE_ACTIVITY_FILE, data)
+
+def get_xp_for_level(level):
+    """XP необходимый для уровня"""
+    return int(level ** 2 * 100)
+
+def get_total_xp_for_level(level):
+    """Общий XP для достижения уровня"""
+    total = 0
+    for i in range(1, level + 1):
+        total += get_xp_for_level(i)
+    return total
+
+def get_level_from_xp(total_xp):
+    """Определить уровень по общему XP"""
+    level = 1
+    while get_total_xp_for_level(level) <= total_xp and level < MAX_LEVEL:
+        level += 1
+    return level
+
+def get_xp_progress(total_xp):
+    """Вернуть текущий уровень, прогресс и следующий уровень"""
+    level = get_level_from_xp(total_xp)
+    
+    if level >= MAX_LEVEL:
+        return MAX_LEVEL, get_total_xp_for_level(MAX_LEVEL), get_total_xp_for_level(MAX_LEVEL), 100
+    
+    current_level_xp = get_total_xp_for_level(level - 1) if level > 1 else 0
+    next_level_xp = get_total_xp_for_level(level)
+    progress = total_xp - current_level_xp
+    required = next_level_xp - current_level_xp
+    percentage = int((progress / required) * 100) if required > 0 else 0
+    
+    return level, progress, required, percentage
+
+def add_xp(user_id, amount):
+    """Добавить XP пользователю"""
+    levels = load_levels()
+    user_id = str(user_id)
+    
+    if user_id not in levels:
+        levels[user_id] = {"xp": 0, "messages": 0, "voice_minutes": 0, "level": 1}
+    
+    levels[user_id]["xp"] += amount
+    levels[user_id]["level"] = get_level_from_xp(levels[user_id]["xp"])
+    
+    save_levels(levels)
+    return levels[user_id]["level"]
+
+
+# ============================================
+# 🖼️ ГЕНЕРАЦИЯ КАРТОЧКИ УРОВНЯ
+# ============================================
+async def create_level_card(user: discord.Member, level_data: dict):
+    """Создать карточку уровня с аватаркой и баннером"""
+    
+    # Размеры
+    width, height = 900, 300
+    
+    # Создаём изображение
+    img = Image.new('RGB', (width, height), color=(20, 20, 30))
+    draw = ImageDraw.Draw(img)
+    
+    # Загружаем аватарку
+    try:
+        avatar_url = user.avatar.url if user.avatar else user.default_avatar.url
+        async with aiohttp.ClientSession() as session:
+            async with session.get(avatar_url) as resp:
+                avatar_data = await resp.read()
+        avatar = Image.open(io.BytesIO(avatar_data)).convert('RGBA')
+        avatar = avatar.resize((200, 200), Image.Resampling.LANCZOS)
+        
+        # Круглая маска для аватарки
+        mask = Image.new('L', (200, 200), 0)
+        draw_mask = ImageDraw.Draw(mask)
+        draw_mask.ellipse([0, 0, 200, 200], fill=255)
+        avatar.putalpha(mask)
+        
+        # Размещаем аватарку
+        img.paste(avatar, (50, 50), avatar)
+    except Exception as e:
+        print(f"Ошибка загрузки аватарки: {e}")
+        # Запасной вариант - просто квадрат
+        draw.rectangle([50, 50, 250, 250], fill=(100, 100, 100))
+    
+    # Баннер (градиент)
+    for i in range(width):
+        r = int(30 + (i / width) * 20)
+        g = int(30 + (i / width) * 20)
+        b = int(50 + (i / width) * 30)
+        draw.rectangle([i, 0, i+1, height], fill=(r, g, b))
+    
+    # Текст - Имя пользователя
+    try:
+        font_large = ImageFont.truetype("arial.ttf", 48)
+        font_medium = ImageFont.truetype("arial.ttf", 32)
+        font_small = ImageFont.truetype("arial.ttf", 24)
+    except:
+        font_large = ImageFont.load_default()
+        font_medium = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+    
+    # Никнейм
+    draw.text((280, 70), user.display_name[:20], fill=(255, 255, 255), font=font_large)
+    
+    # Уровень
+    level = level_data.get("level", 1)
+    draw.text((280, 130), f"Уровень {level}", fill=(255, 215, 0), font=font_medium)
+    
+    # Статистика
+    messages = level_data.get("messages", 0)
+    voice_mins = level_data.get("voice_minutes", 0)
+    hours = voice_mins // 60
+    mins = voice_mins % 60
+    
+    draw.text((280, 180), f"💬 Сообщений: {messages:,}", fill=(200, 200, 200), font=font_small)
+    draw.text((280, 215), f"🎤 В голосе: {hours}ч {mins}м", fill=(200, 200, 200), font=font_small)
+    
+    # Прогресс бар
+    total_xp = level_data.get("xp", 0)
+    lvl, progress, required, percentage = get_xp_progress(total_xp)
+    
+    # Фон прогресс бара
+    draw.rounded_rectangle([280, 250, 850, 275], radius=12, fill=(50, 50, 60))
+    
+    # Заполнение прогресс бара
+    if required > 0:
+        fill_width = int(570 * (progress / required))
+        # Градиент для прогресс бара
+        for i in range(fill_width):
+            r = int(100 + (i / fill_width) * 155) if fill_width > 0 else 100
+            g = int(100 + (i / fill_width) * 155) if fill_width > 0 else 100
+            b = int(200 + (i / fill_width) * 55) if fill_width > 0 else 200
+            draw.rectangle([280 + i, 250, 281 + i, 275], fill=(r, g, b))
+    
+    # Текст прогресса
+    progress_text = f"{progress:,} / {required:,} XP ({percentage}%)"
+    draw.text((850, 255), progress_text, fill=(255, 255, 255), font=font_small, anchor="rm")
+    
+    # Рамка
+    draw.rectangle([0, 0, width-1, height-1], outline=(100, 100, 120), width=3)
+    
+    # Сохраняем в буфер
+    buffer = io.BytesIO()
+    img.save(buffer, format='PNG')
+    buffer.seek(0)
+    
+    return buffer
+
+
+# ============================================
+# ️ КОМАНДЫ УРОВНЕЙ
+# ============================================
+@tree.command(name="level", description="🎖️ Показать свой уровень")
+@app_commands.describe(member="Участник для просмотра (по умолчанию - вы)")
+async def level(interaction: discord.Interaction, member: discord.Member = None):
+    await interaction.response.defer()
+    
+    target = member or interaction.user
+    levels = load_levels()
+    user_id = str(target.id)
+    
+    level_data = levels.get(user_id, {"xp": 0, "messages": 0, "voice_minutes": 0, "level": 1})
+    
+    # Генерируем карточку
+    try:
+        card_buffer = await create_level_card(target, level_data)
+        file = discord.File(card_buffer, filename=f"level_{target.id}.png")
+        
+        embed = discord.Embed(
+            title=f"🎖️ Карточка уровня: {target.display_name}",
+            color=discord.Color.gold()
+        )
+        embed.set_image(url=f"attachment://level_{target.id}.png")
+        
+        await interaction.followup.send(file=file, embed=embed)
+    except Exception as e:
+        print(f"Ошибка генерации карточки: {e}")
+        
+        # Запасной вариант - текстовый embed
+        lvl, progress, required, percentage = get_xp_progress(level_data.get("xp", 0))
+        
+        embed = discord.Embed(
+            title=f"🎖️ Уровень: {target.display_name}",
+            description=f"**Уровень {lvl}**\n\n"
+                       f"💬 **Сообщений:** {level_data.get('messages', 0):,}\n"
+                       f"🎤 **В голосе:** {level_data.get('voice_minutes', 0)} мин\n"
+                       f"⭐ **XP:** {progress:,} / {required:,} ({percentage}%)\n"
+                       f"📊 **Всего XP:** {level_data.get('xp', 0):,}",
+            color=discord.Color.gold()
+        )
+        embed.set_thumbnail(url=target.avatar.url if target.avatar else target.default_avatar.url)
+        
+        await interaction.followup.send(embed=embed)
+
+
+@tree.command(name="leaderboard", description="🏆 Топ участников по уровням")
+async def leaderboard(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
+    levels = load_levels()
+    guild = interaction.guild
+    
+    if not levels:
+        await interaction.followup.send("📭 Пока нет данных!", ephemeral=True)
+        return
+    
+    # Сортировка по уровню
+    sorted_levels = sorted(levels.items(), key=lambda x: x[1].get("level", 1), reverse=True)[:10]
+    
+    embed = discord.Embed(
+        title="🏆 Топ участников Warhound Logistics",
+        description="🎖️ По уровню активности",
+        color=discord.Color.gold(),
+        timestamp=discord.utils.utcnow()
+    )
+    
+    for i, (user_id, data) in enumerate(sorted_levels, 1):
+        medal = ["🥇", "🥈", "🥉"][i-1] if i <= 3 else f"{i}."
+        user = guild.get_member(int(user_id))
+        name = user.display_name if user else f"Участник#{user_id[-4:]}"
+        
+        embed.add_field(
+            name=f"{medal} {name}",
+            value=f"🎖️ Уровень {data.get('level', 1)}\n"
+                  f"💬 {data.get('messages', 0):,} сообщений\n"
+                  f"🎤 {data.get('voice_minutes', 0)} мин в голосе",
+            inline=False
+        )
+    
+    embed.set_footer(text="Активность = сообщения + голосовое время")
+    
+    await interaction.followup.send(embed=embed)
+
+
+@tree.command(name="reset_level", description="🔄 Сбросить уровень участника (админ)")
+@app_commands.describe(member="Участник для сброса")
+async def reset_level(interaction: discord.Interaction, member: discord.Member):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Только для администрации!", ephemeral=True)
+        return
+    
+    levels = load_levels()
+    user_id = str(member.id)
+    
+    if user_id in levels:
+        del levels[user_id]
+        save_levels(levels)
+        await interaction.response.send_message(f"✅ Уровень {member.mention} сброшен!", ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ У пользователя нет данных!", ephemeral=True)
+
+
+# ============================================
+# 📊 ОТСЛЕЖИВАНИЕ АКТИВНОСТИ
+# ============================================
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    
+    user_id = str(message.author.id)
+    now = datetime.now().timestamp()
+    
+    # Проверка кулдауна
+    if user_id in message_cooldowns:
+        if now - message_cooldowns[user_id] < MESSAGE_COOLDOWN:
+            await bot.process_commands(message)
+            return
+    
+    # Начисление XP
+    levels = load_levels()
+    if user_id not in levels:
+        levels[user_id] = {"xp": 0, "messages": 0, "voice_minutes": 0, "level": 1}
+    
+    levels[user_id]["messages"] += 1
+    levels[user_id]["xp"] += XP_PER_MESSAGE
+    levels[user_id]["level"] = get_level_from_xp(levels[user_id]["xp"])
+    save_levels(levels)
+    
+    message_cooldowns[user_id] = now
+    
+    # Проверка повышения уровня
+    old_level = levels[user_id]["level"] - 1
+    new_level = levels[user_id]["level"]
+    
+    if new_level > old_level and new_level <= MAX_LEVEL:
+        channel = message.channel
+        await channel.send(
+            f"🎉 **{message.author.mention}** повысил уровень до **{new_level}**! "
+            f"{'🏆 МАКСИМАЛЬНЫЙ УРОВЕНЬ!' if new_level == MAX_LEVEL else ''}"
+        )
+    
+    await bot.process_commands(message)
+
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    user_id = str(member.id)
+    now = datetime.now()
+    
+    # Пользователь зашёл в голосовой канал
+    if after.channel and not before.channel:
+        voice_activity[user_id] = {
+            "start_time": now.timestamp(),
+            "total_minutes": 0,
+            "last_activity": now.timestamp(),
+            "is_speaking": False
+        }
+    
+    # Пользователь вышел из голосового канала
+    elif not after.channel and before.channel:
+        if user_id in voice_activity:
+            activity = voice_activity[user_id]
+            minutes = int((now.timestamp() - activity["start_time"]) / 60)
+            
+            # Начисление XP за голосовое время
+            if minutes >= 10:
+                xp_earned = (minutes // 10) * XP_PER_10MIN_VOICE
+                add_xp(user_id, xp_earned)
+                
+                # Сохранение в общую статистику
+                levels = load_levels()
+                if user_id not in levels:
+                    levels[user_id] = {"xp": 0, "messages": 0, "voice_minutes": 0, "level": 1}
+                levels[user_id]["voice_minutes"] += minutes
+                save_levels(levels)
+            
+            del voice_activity[user_id]
+    
+    # Обновление активности (для проверки AFK)
+    if after.channel and user_id in voice_activity:
+        voice_activity[user_id]["last_activity"] = now.timestamp()
+        voice_activity[user_id]["is_speaking"] = not after.self_mute and not after.self_deaf
+
+
+# Проверка AFK в голосовых каналах
+@tasks.loop(minutes=5)
+async def check_voice_afk():
+    """Проверка неактивных пользователей в голосовых каналах"""
+    now = datetime.now().timestamp()
+    
+    for user_id, activity in list(voice_activity.items()):
+        # Если не было активности 5 минут - считаем AFK
+        if now - activity["last_activity"] > 300:
+            activity["is_speaking"] = False
+
+
+@check_voice_afk.before_loop
+async def before_check_voice_afk():
+    await bot.wait_until_ready()
 
 
 # ============================================
@@ -73,7 +450,6 @@ def save_birthdays(data):
     save_json(BIRTHDAYS_FILE, data)
 
 def get_age(birthdate: str) -> int:
-    """Вычислить возраст по дате рождения"""
     try:
         birth = datetime.strptime(birthdate, "%d.%m.%Y")
         today = datetime.now()
@@ -83,234 +459,6 @@ def get_age(birthdate: str) -> int:
         return 0
 
 
-# ============================================
-# 📅 РАСПИСАНИЕ РЕЙСОВ
-# ============================================
-def load_schedules():
-    return load_json(SCHEDULES_FILE)
-
-def save_schedules(data):
-    save_json(SCHEDULES_FILE, data)
-
-def add_schedule(title, description, start_time, route, organizer_id):
-    schedules = load_schedules()
-    schedule_id = len(schedules) + 1
-    schedules[str(schedule_id)] = {
-        "id": schedule_id,
-        "title": title,
-        "description": description,
-        "start_time": start_time,
-        "route": route,
-        "organizer_id": organizer_id,
-        "created_at": datetime.now().isoformat()
-    }
-    save_schedules(schedules)
-    return schedule_id
-
-
-# ============================================
-# 🎫 ТИКЕТЫ
-# ============================================
-def load_tickets():
-    return load_json(TICKETS_FILE)
-
-def save_tickets(data):
-    save_json(TICKETS_FILE, data)
-
-def create_ticket(user_id, channel_id):
-    tickets = load_tickets()
-    ticket_id = len(tickets) + 1
-    tickets[str(ticket_id)] = {
-        "id": ticket_id,
-        "user_id": user_id,
-        "channel_id": channel_id,
-        "status": "open",
-        "created_at": datetime.now().isoformat()
-    }
-    save_tickets(tickets)
-    return ticket_id
-
-def close_ticket(channel_id):
-    tickets = load_tickets()
-    tickets_to_delete = [tid for tid, t in tickets.items() if t["channel_id"] == str(channel_id)]
-    for tid in tickets_to_delete:
-        del tickets[tid]
-    save_tickets(tickets)
-
-
-# ============================================
-# 📸 ФОТОКОНКУРСЫ
-# ============================================
-def load_contests():
-    return load_json(CONTESTS_FILE)
-
-def save_contests(data):
-    save_json(CONTESTS_FILE, data)
-
-
-# ============================================
-# 🎤 ГОЛОСОВЫЕ КАНАЛЫ
-# ============================================
-@bot.event
-async def on_voice_state_update(member, before, after):
-    guild = member.guild
-    
-    if after.channel and after.channel.id == VOICE_TEMPLATE_CHANNEL_ID:
-        category = guild.get_channel(VOICE_CATEGORY_ID) if VOICE_CATEGORY_ID else None
-        
-        try:
-            new_channel = await guild.create_voice_channel(
-                name=f"🚛 {member.display_name}",
-                category=category,
-                reason="Авто-создание канала для колонны"
-            )
-            
-            await member.move_to(new_channel)
-            user_channels[member.id] = new_channel.id
-            
-            embed = discord.Embed(
-                title="🎤 Ваш канал создан!",
-                description=f"Канал: {new_channel.mention}",
-                color=discord.Color.green()
-            )
-            embed.add_field(
-                name="📋 Команды управления:",
-                value="`!rename <название>` - переименовать\n"
-                      "`!limit <число>` - лимит пользователей\n"
-                      "`!lock` - закрыть канал\n"
-                      "`!unlock` - открыть канал\n"
-                      "`!delete` - удалить канал",
-                inline=False
-            )
-            try:
-                await member.send(embed=embed)
-            except:
-                pass
-        except Exception as e:
-            print(f"Ошибка создания канала: {e}")
-
-    if before.channel and before.channel.id in user_channels.values():
-        channel = before.channel
-        if len(channel.members) == 0:
-            try:
-                await channel.delete(reason="Канал пуст")
-                user_ids_to_delete = [uid for uid, cid in user_channels.items() if cid == channel.id]
-                for uid in user_ids_to_delete:
-                    del user_channels[uid]
-            except Exception as e:
-                print(f"Ошибка удаления канала: {e}")
-
-
-@bot.command(name="rename")
-async def rename_channel(ctx, *, name: str):
-    if not ctx.author.voice:
-        await ctx.send("❌ Вы должны быть в голосовом канале!", delete_after=5)
-        return
-    channel = ctx.author.voice.channel
-    if channel.id not in user_channels.values():
-        await ctx.send("❌ Это не личный канал!", delete_after=5)
-        return
-    owner_id = next((uid for uid, cid in user_channels.items() if cid == channel.id), None)
-    if owner_id != ctx.author.id:
-        await ctx.send("❌ Вы не владелец канала!", delete_after=5)
-        return
-    try:
-        await channel.edit(name=name)
-        await ctx.send(f"✅ Канал переименован в **{name}**", delete_after=5)
-    except Exception as e:
-        await ctx.send(f"❌ Ошибка: {e}", delete_after=5)
-
-
-@bot.command(name="limit")
-async def limit_channel(ctx, limit: int):
-    if not ctx.author.voice:
-        await ctx.send("❌ Вы должны быть в голосовом канале!", delete_after=5)
-        return
-    channel = ctx.author.voice.channel
-    if channel.id not in user_channels.values():
-        await ctx.send("❌ Это не личный канал!", delete_after=5)
-        return
-    owner_id = next((uid for uid, cid in user_channels.items() if cid == channel.id), None)
-    if owner_id != ctx.author.id:
-        await ctx.send("❌ Вы не владелец канала!", delete_after=5)
-        return
-    if limit < 0 or limit > 99:
-        await ctx.send("❌ Лимит должен быть от 0 до 99!", delete_after=5)
-        return
-    try:
-        await channel.edit(user_limit=limit)
-        await ctx.send(f"✅ Лимит установлен: **{limit}** чел.", delete_after=5)
-    except Exception as e:
-        await ctx.send(f"❌ Ошибка: {e}", delete_after=5)
-
-
-@bot.command(name="lock")
-async def lock_channel(ctx):
-    if not ctx.author.voice:
-        await ctx.send("❌ Вы должны быть в голосовом канале!", delete_after=5)
-        return
-    channel = ctx.author.voice.channel
-    if channel.id not in user_channels.values():
-        await ctx.send("❌ Это не личный канал!", delete_after=5)
-        return
-    owner_id = next((uid for uid, cid in user_channels.items() if cid == channel.id), None)
-    if owner_id != ctx.author.id:
-        await ctx.send("❌ Вы не владелец канала!", delete_after=5)
-        return
-    try:
-        overwrite = discord.PermissionOverwrite(connect=False)
-        await channel.set_permission(ctx.guild.default_role, overwrite=overwrite)
-        await ctx.send("🔒 Канал закрыт", delete_after=5)
-    except Exception as e:
-        await ctx.send(f"❌ Ошибка: {e}", delete_after=5)
-
-
-@bot.command(name="unlock")
-async def unlock_channel(ctx):
-    if not ctx.author.voice:
-        await ctx.send("❌ Вы должны быть в голосовом канале!", delete_after=5)
-        return
-    channel = ctx.author.voice.channel
-    if channel.id not in user_channels.values():
-        await ctx.send("❌ Это не личный канал!", delete_after=5)
-        return
-    owner_id = next((uid for uid, cid in user_channels.items() if cid == channel.id), None)
-    if owner_id != ctx.author.id:
-        await ctx.send("❌ Вы не владелец канала!", delete_after=5)
-        return
-    try:
-        overwrite = discord.PermissionOverwrite(connect=None)
-        await channel.set_permission(ctx.guild.default_role, overwrite=overwrite)
-        await ctx.send("🔓 Канал открыт", delete_after=5)
-    except Exception as e:
-        await ctx.send(f"❌ Ошибка: {e}", delete_after=5)
-
-
-@bot.command(name="delete")
-async def delete_channel(ctx):
-    if not ctx.author.voice:
-        await ctx.send("❌ Вы должны быть в голосовом канале!", delete_after=5)
-        return
-    channel = ctx.author.voice.channel
-    if channel.id not in user_channels.values():
-        await ctx.send("❌ Это не личный канал!", delete_after=5)
-        return
-    owner_id = next((uid for uid, cid in user_channels.items() if cid == channel.id), None)
-    if owner_id != ctx.author.id:
-        await ctx.send("❌ Вы не владелец канала!", delete_after=5)
-        return
-    try:
-        await channel.delete(reason="Удалён владельцем")
-        if ctx.author.id in user_channels:
-            del user_channels[ctx.author.id]
-        await ctx.send("✅ Канал удалён", delete_after=5)
-    except Exception as e:
-        await ctx.send(f"❌ Ошибка: {e}", delete_after=5)
-
-
-# ============================================
-# 🎂 ДНИ РОЖДЕНИЯ
-# ============================================
 @tree.command(name="birthday", description="🎂 Установить или посмотреть день рождения")
 @app_commands.describe(day="День (1-31)", month="Месяц (1-12)", year="Год (например, 1995)")
 async def birthday(interaction: discord.Interaction, day: int = None, month: int = None, year: int = None):
@@ -326,25 +474,18 @@ async def birthday(interaction: discord.Interaction, day: int = None, month: int
                 description=f"📅 **{bday}**\n🎂 Возраст: **{age}** лет",
                 color=discord.Color.pink()
             )
-            embed.set_footer(text="Чтобы изменить, используйте /birthday с параметрами")
             await interaction.response.send_message(embed=embed, ephemeral=True)
         else:
             embed = discord.Embed(
                 title="🎂 День рождения не установлен",
-                description="Укажите дату рождения командой:\n`/birthday day:15 month:6 year:1995`\n\n🎉 В день рождения бот поздравит вас в общем канале!",
+                description="Укажите дату: `/birthday day:15 month:6 year:1995`",
                 color=discord.Color.blue()
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
-    if day < 1 or day > 31:
-        await interaction.response.send_message("❌ День должен быть от 1 до 31!", ephemeral=True)
-        return
-    if month < 1 or month > 12:
-        await interaction.response.send_message("❌ Месяц должен быть от 1 до 12!", ephemeral=True)
-        return
-    if year and (year < 1900 or year > datetime.now().year):
-        await interaction.response.send_message("❌ Неверный год!", ephemeral=True)
+    if day < 1 or day > 31 or month < 1 or month > 12:
+        await interaction.response.send_message("❌ Неверная дата!", ephemeral=True)
         return
     
     birthdate = f"{day:02d}.{month:02d}"
@@ -355,16 +496,10 @@ async def birthday(interaction: discord.Interaction, day: int = None, month: int
     birthdays[str(interaction.user.id)] = birthdate
     save_birthdays(birthdays)
     
-    embed = discord.Embed(
-        title="🎂 День рождения установлен!",
-        description=f"{interaction.user.mention}, ваш день рождения: **{birthdate}**\n\n🎉 В этот день бот поздравит вас в общем канале!",
-        color=discord.Color.green()
-    )
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(f"✅ День рождения установлен: **{birthdate}**", ephemeral=True)
 
 
-@tree.command(name="birthdays", description="📅 Показать все дни рождения участников")
+@tree.command(name="birthdays", description="📅 Показать все дни рождения")
 async def birthdays_list(interaction: discord.Interaction):
     await interaction.response.defer()
     
@@ -375,73 +510,30 @@ async def birthdays_list(interaction: discord.Interaction):
         await interaction.followup.send("📭 Пока никто не установил день рождения!", ephemeral=True)
         return
     
-    sorted_bdays = sorted(
-        birthdays.items(),
-        key=lambda x: datetime.strptime(x[1][:5], "%d.%m") if len(x[1]) >= 5 else datetime.now()
-    )
-    
-    months = {
-        1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель",
-        5: "Май", 6: "Июнь", 7: "Июль", 8: "Август",
-        9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"
-    }
+    sorted_bdays = sorted(birthdays.items(), key=lambda x: x[1][:5])[:20]
     
     embed = discord.Embed(
         title="📅 Дни рождения Warhound Logistics",
-        description="🎉 Поздравляем наших водителей в их праздники!",
         color=discord.Color.pink(),
         timestamp=discord.utils.utcnow()
     )
     
-    current_month = None
     bday_list = []
+    for user_id, bdate in sorted_bdays:
+        user = guild.get_member(int(user_id))
+        name = user.display_name if user else f"Участник#{user_id[-4:]}"
+        bday_list.append(f"• **{name}** — {bdate}")
     
-    for user_id, bdate in sorted_bdays[:20]:
-        try:
-            day, month = int(bdate[:2]), int(bdate[3:5])
-            user = guild.get_member(int(user_id))
-            name = user.display_name if user else f"Участник#{user_id[-4:]}"
-            
-            month_name = months.get(month, "Неизвестно")
-            
-            if current_month != month_name:
-                if bday_list:
-                    embed.add_field(name=f"📍 {current_month}", value="\n".join(bday_list), inline=False)
-                    bday_list = []
-                current_month = month_name
-            
-            age_text = f" ({get_age(bdate)} лет)" if len(bdate) > 5 else ""
-            bday_list.append(f"• **{name}** — {day}.{month:02d}{age_text}")
-        except:
-            continue
-    
-    if bday_list:
-        embed.add_field(name=f"📍 {current_month}", value="\n".join(bday_list), inline=False)
-    
-    embed.set_footer(text=f"Всего: {len(birthdays)} участников | Чтобы добавить свою дату: /birthday")
+    embed.description = "\n".join(bday_list)
+    embed.set_footer(text=f"Всего: {len(birthdays)} участников")
     
     await interaction.followup.send(embed=embed)
 
 
-@tree.command(name="remove_birthday", description="❌ Удалить свой день рождения")
-async def remove_birthday(interaction: discord.Interaction):
-    birthdays = load_birthdays()
-    user_id = str(interaction.user.id)
-    
-    if user_id in birthdays:
-        del birthdays[user_id]
-        save_birthdays(birthdays)
-        await interaction.response.send_message("✅ Ваш день рождения удалён!", ephemeral=True)
-    else:
-        await interaction.response.send_message("❌ У вас не установлен день рождения!", ephemeral=True)
-
-
 @tasks.loop(hours=24)
 async def check_birthdays():
-    """Ежедневная проверка дней рождения"""
     now = datetime.now()
     today = f"{now.day:02d}.{now.month:02d}"
-    
     birthdays = load_birthdays()
     
     for user_id, bdate in birthdays.items():
@@ -453,9 +545,9 @@ async def check_birthdays():
                     age = get_age(bdate)
                     await channel.send(
                         f"🎂🎉 **С ДНЁМ РОЖДЕНИЯ, {user.mention}!** 🎉\n\n"
-                        f"🎁 Желаю ровных дорог, полных прицепов и никаких ДТП!\n"
+                        f"🎁 Желаю ровных дорог и полных прицепов!\n"
                         f"🎂 Возраст: **{age}** лет\n"
-                        f"🐺 **Беги со стаей** и будь счастлив на дорогах! 🚛⚡"
+                        f"🐺 **Беги со стаей**! 🚛⚡"
                     )
 
 
@@ -468,8 +560,14 @@ async def before_check_birthdays():
 
 
 # ============================================
-# 🎫 ТИКЕТ-СИСТЕМА
+# 🎫 ТИКЕТЫ
 # ============================================
+def load_tickets():
+    return load_json(TICKETS_FILE)
+
+def save_tickets(data):
+    save_json(TICKETS_FILE, data)
+
 class TicketSelect(Select):
     def __init__(self):
         super().__init__(
@@ -486,7 +584,7 @@ class TicketSelect(Select):
     async def callback(self, interaction: discord.Interaction):
         category = interaction.guild.get_channel(TICKET_CATEGORY_ID)
         if not category:
-            await interaction.response.send_message("❌ Категория для тикетов не настроена!", ephemeral=True)
+            await interaction.response.send_message("❌ Категория не настроена!", ephemeral=True)
             return
         
         for channel in interaction.guild.text_channels:
@@ -497,45 +595,37 @@ class TicketSelect(Select):
         overwrites = {
             interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
             interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-            interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_messages=True),
+            interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
         }
-        
-        ticket_type = {"game": "🎮", "org": "💬", "complaint": "⚠️", "suggestion": "💡", "other": "🤝"}.get(self.values[0], "🎫")
         
         channel = await interaction.guild.create_text_channel(
             name=f"тикет-{interaction.user.name}",
             category=category,
-            overwrites=overwrites,
-            reason=f"Тикет [{self.values[0]}] от {interaction.user}"
+            overwrites=overwrites
         )
         
-        create_ticket(str(interaction.user.id), str(channel.id))
+        tickets = load_tickets()
+        tickets[str(channel.id)] = {"user_id": str(interaction.user.id), "status": "open"}
+        save_tickets(tickets)
         
         embed = discord.Embed(
-            title=f"{ticket_type} Обращение к администрации",
-            description=f"Привет, {interaction.user.mention}!\n\n"
-                       f"Тип обращения: **{self.values[0]}**\n\n"
-                       "📝 Опишите вашу проблему или вопрос.\n"
-                       "Администрация ответит в ближайшее время.\n\n"
-                       "❌ **Закрыть тикет:** напишите `!close`\n"
-                       "👥 **Добавить участника:** `!add @user`",
+            title="🎫 Обращение к администрации",
+            description=f"Привет, {interaction.user.mention}!\n\n📝 Опишите ваш вопрос.\n\n`!close` - закрыть тикет",
             color=discord.Color.orange()
         )
-        embed.set_footer(text=f"Тикет #{channel.id}")
         
         await channel.send(embed=embed)
         await interaction.response.send_message(f"✅ Тикет создан: {channel.mention}", ephemeral=True)
 
 
-@tree.command(name="ticket", description="🎫 Создать обращение к администрации")
+@tree.command(name="ticket", description="🎫 Создать обращение")
 async def ticket(interaction: discord.Interaction):
     view = View()
     view.add_item(TicketSelect())
     
     embed = discord.Embed(
         title="🎫 Система обращений",
-        description="Выберите тип вашего обращения ниже.\n"
-                   "Созданный тикет будет виден только вам и администрации.",
+        description="Выберите тип обращения ниже.",
         color=discord.Color.blue()
     )
     
@@ -545,94 +635,80 @@ async def ticket(interaction: discord.Interaction):
 @bot.command(name="close")
 async def close_ticket(ctx):
     if "тикет-" not in ctx.channel.name:
-        await ctx.send("❌ Эта команда работает только в тикетах!", delete_after=5)
+        await ctx.send("❌ Только для тикетов!", delete_after=5)
         return
     
-    close_ticket(ctx.channel.id)
+    tickets = load_tickets()
+    if str(ctx.channel.id) in tickets:
+        del tickets[str(ctx.channel.id)]
+        save_tickets(tickets)
     
-    await ctx.send("🔒 Тикет закрывается через 5 секунд...")
+    await ctx.send("🔒 Закрывается через 5 сек...")
     await asyncio.sleep(5)
     await ctx.channel.delete()
 
 
-@bot.command(name="add")
-async def add_to_ticket(ctx, member: discord.Member):
-    if "тикет-" not in ctx.channel.name:
-        await ctx.send("❌ Эта команда работает только в тикетах!", delete_after=5)
-        return
-    
-    await ctx.channel.set_permissions(member, view_channel=True, send_messages=True)
-    await ctx.send(f"✅ {member.mention} добавлен в тикет!", delete_after=5)
+# ============================================
+# 📅 РАСПИСАНИЕ
+# ============================================
+def load_schedules():
+    return load_json(SCHEDULES_FILE)
+
+def save_schedules(data):
+    save_json(SCHEDULES_FILE, data)
 
 
-# ============================================
-# 📅 РАСПИСАНИЕ РЕЙСОВ
-# ============================================
-@tree.command(name="add_schedule", description="📅 Добавить рейс (только админ)")
-@app_commands.describe(
-    title="Название рейса",
-    description="Описание маршрута",
-    start_time="Дата и время (ДД.ММ ЧЧ:ММ)",
-    route="Маршрут: Город А → Город Б"
-)
-async def add_schedule(
-    interaction: discord.Interaction,
-    title: str,
-    description: str,
-    start_time: str,
-    route: str
-):
+@tree.command(name="add_schedule", description="📅 Добавить рейс (админ)")
+@app_commands.describe(title="Название", start_time="Время (ДД.ММ ЧЧ:ММ)", route="Маршрут")
+async def add_schedule(interaction: discord.Interaction, title: str, start_time: str, route: str, description: str = ""):
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ Только для администрации!", ephemeral=True)
+        await interaction.response.send_message("❌ Только админам!", ephemeral=True)
         return
     
-    await interaction.response.defer()
-    
-    add_schedule(title, description, start_time, route, str(interaction.user.id))
+    schedules = load_schedules()
+    schedule_id = len(schedules) + 1
+    schedules[str(schedule_id)] = {
+        "title": title,
+        "start_time": start_time,
+        "route": route,
+        "description": description,
+        "organizer_id": str(interaction.user.id)
+    }
+    save_schedules(schedules)
     
     embed = discord.Embed(
-        title="📅 Новый рейс добавлен!",
-        description=f"**{title}**\n{description}\n\n"
-                   f"🗓️ **Время:** {start_time}\n"
-                   f"🛣️ **Маршрут:** {route}\n"
-                   f"👤 **Организатор:** {interaction.user.mention}",
+        title="📅 Новый рейс",
+        description=f"**{title}**\n{description}\n\n🗓️ {start_time}\n🛣️ {route}",
         color=discord.Color.green()
     )
     
-    await interaction.followup.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
     
-    schedule_channel = interaction.guild.get_channel(SCHEDULE_CHANNEL_ID)
-    if schedule_channel:
-        await schedule_channel.send("🔔 **Новый рейс доступен для записи!**", embed=embed)
+    channel = interaction.guild.get_channel(SCHEDULE_CHANNEL_ID)
+    if channel:
+        await channel.send("🔔 **Новый рейс!**", embed=embed)
 
 
-@tree.command(name="schedule", description="📅 Показать ближайшие рейсы")
+@tree.command(name="schedule", description="📅 Показать рейсы")
 async def show_schedule(interaction: discord.Interaction):
     await interaction.response.defer()
     
     schedules = load_schedules()
     
     if not schedules:
-        await interaction.followup.send("📭 Ближайших рейсов нет. Следите за анонсами!", ephemeral=True)
+        await interaction.followup.send("📭 Рейсов нет!", ephemeral=True)
         return
     
-    # Сортировка по времени
-    sorted_schedules = sorted(schedules.values(), key=lambda x: x["start_time"])[:5]
-    
     embed = discord.Embed(
-        title="📅 Ближайшие рейсы Warhound Logistics",
-        description="Записывайтесь и не опаздывайте! 🚛🐺",
+        title="📅 Ближайшие рейсы",
         color=discord.Color.blue(),
         timestamp=discord.utils.utcnow()
     )
     
-    for schedule in sorted_schedules:
-        organizer = interaction.guild.get_member(int(schedule["organizer_id"]))
-        org_name = organizer.mention if organizer else "Неизвестно"
-        
+    for sid, data in list(schedules.items())[:5]:
         embed.add_field(
-            name=f"🚛 {schedule['title']}",
-            value=f"{schedule['description']}\n🗓️ {schedule['start_time']}\n🛣️ {schedule['route']}\n👤 Орг: {org_name}",
+            name=f"🚛 {data['title']}",
+            value=f"🗓️ {data['start_time']}\n🛣️ {data['route']}",
             inline=False
         )
     
@@ -642,73 +718,61 @@ async def show_schedule(interaction: discord.Interaction):
 # ============================================
 # 📸 ФОТОКОНКУРСЫ
 # ============================================
-@tree.command(name="create_contest", description="📸 Создать фотоконкурс (админ)")
-@app_commands.describe(title="Название конкурса", duration_hours="Длительность в часах")
+def load_contests():
+    return load_json(CONTESTS_FILE)
+
+def save_contests(data):
+    save_json(CONTESTS_FILE, data)
+
+
+@tree.command(name="create_contest", description="📸 Создать конкурс (админ)")
+@app_commands.describe(title="Название", duration_hours="Часов")
 async def create_contest(interaction: discord.Interaction, title: str, duration_hours: int = 24):
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ Только для администрации!", ephemeral=True)
+        await interaction.response.send_message("❌ Только админам!", ephemeral=True)
         return
-    
-    await interaction.response.defer()
     
     contests = load_contests()
     contest_id = len(contests) + 1
-    end_time = (datetime.now() + timedelta(hours=duration_hours)).isoformat()
-    
     contests[str(contest_id)] = {
-        "id": contest_id,
         "title": title,
-        "description": f"Конкурс скриншотов от {interaction.user.name}",
-        "end_time": end_time,
-        "status": "active",
-        "created_at": datetime.now().isoformat()
+        "duration": duration_hours,
+        "status": "active"
     }
     save_contests(contests)
     
     embed = discord.Embed(
         title="📸 Новый фотоконкурс!",
-        description=f"**{title}**\n\n"
-                   f"📷 Присылайте ваши лучшие скриншоты в этот канал!\n"
-                   f"⏰ Конкурс продлится **{duration_hours} часов**\n"
-                   f"🗳️ Голосуйте реакциями 👍 под фото\n\n"
-                   f"🏆 Победитель получит звание и роль!",
+        description=f"**{title}**\n\n📷 Присылайте скриншоты!\n⏰ {duration_hours} часов",
         color=discord.Color.pink()
     )
-    embed.set_footer(text=f"ID конкурса: {contest_id}")
     
     channel = interaction.guild.get_channel(PHOTO_CONTEST_CHANNEL_ID)
     if channel:
-        msg = await channel.send(embed=embed)
-        await msg.add_reaction("📷")
-        await msg.add_reaction("👍")
-        await interaction.followup.send(f"✅ Конкурс создан в {channel.mention}!", ephemeral=True)
+        await channel.send(embed=embed)
+        await interaction.response.send_message("✅ Конкурс создан!", ephemeral=True)
     else:
-        await interaction.followup.send("❌ Канал для фотоконкурсов не настроен!", ephemeral=True)
+        await interaction.response.send_message("❌ Канал не найден!", ephemeral=True)
 
 
-@tree.command(name="end_contest", description="🏆 Завершить фотоконкурс и выбрать победителя (админ)")
-@app_commands.describe(message_id="ID сообщения с победным фото", winner="Победитель конкурса")
-async def end_contest(interaction: discord.Interaction, message_id: str, winner: discord.Member):
+@tree.command(name="end_contest", description="🏆 Завершить конкурс (админ)")
+@app_commands.describe(winner="Победитель")
+async def end_contest(interaction: discord.Interaction, winner: discord.Member):
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ Только для администрации!", ephemeral=True)
+        await interaction.response.send_message("❌ Только админам!", ephemeral=True)
         return
     
-    await interaction.response.defer()
-    
     embed = discord.Embed(
-        title="🏆 Победитель фотоконкурса!",
-        description=f"🎉 Поздравляем {winner.mention}!\n\n"
-                   f"📸 [Победное фото](https://discord.com/channels/{interaction.guild.id}/{PHOTO_CONTEST_CHANNEL_ID}/{message_id})\n\n"
-                   f"⭐ Вы получаете звание **Фотограф стаи** и специальную роль!",
+        title="🏆 Победитель конкурса!",
+        description=f"🎉 {winner.mention} получает звание **Фотограф стаи**!",
         color=discord.Color.gold()
     )
     
     channel = interaction.guild.get_channel(PHOTO_CONTEST_CHANNEL_ID)
     if channel:
         await channel.send(embed=embed)
-        await interaction.followup.send("✅ Конкурс завершён, победитель объявлен!", ephemeral=True)
-    else:
-        await interaction.followup.send("❌ Канал не найден!", ephemeral=True)
+    
+    await interaction.response.send_message("✅ Конкурс завершён!", ephemeral=True)
 
 
 # ============================================
@@ -732,20 +796,17 @@ async def check_server_status():
         await bot.change_presence(activity=discord.Game(name="🌙 Статус неизвестен"))
 
 
-@tree.command(name="server", description="🖥️ Статус игрового сервера")
+@tree.command(name="server", description="🖥️ Статус сервера")
 async def server_status(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="🖥️ Статус сервера Warhound Logistics",
-        description="🎮 Euro Truck Simulator 2 / American Truck Simulator",
+        title="🖥️ Статус сервера",
+        description="🎮 ETS2 / ATS",
         color=discord.Color.green(),
         timestamp=discord.utils.utcnow()
     )
-    
     embed.add_field(name="🌐 IP", value=f"||{ETS2_SERVER_IP}:{ETS2_SERVER_PORT}||", inline=False)
-    embed.add_field(name="👥 Статус", value="🟢 Онлайн (проверка каждые 5 мин)", inline=True)
-    embed.add_field(name="🚛 Конвой", value="Доступен", inline=True)
-    
-    embed.set_footer(text="Автоматическая проверка каждые 5 минут")
+    embed.add_field(name="👥 Статус", value="🟢 Онлайн", inline=True)
+    embed.set_footer(text="Проверка каждые 5 минут")
     
     await interaction.response.send_message(embed=embed)
 
@@ -753,54 +814,37 @@ async def server_status(interaction: discord.Interaction):
 # ============================================
 # 📢 SAY COMMAND
 # ============================================
-class EmbedModal(Modal, title="📝 Создать Embed сообщение"):
-    title_input = TextInput(label="Заголовок", placeholder="Введите заголовок", max_length=256, required=False, default="📢 Объявление")
-    description = TextInput(label="Описание", style=discord.TextStyle.long, placeholder="Основной текст", max_length=4000, required=True)
-    color = TextInput(label="Цвет (HEX)", placeholder="#3498db", max_length=7, required=False, default="#3498db")
-    footer = TextInput(label="Подвал", placeholder="Текст в подвале", max_length=2048, required=False)
+class EmbedModal(Modal, title="📝 Создать Embed"):
+    title_input = TextInput(label="Заголовок", max_length=256, required=False, default="📢 Объявление")
+    description = TextInput(label="Описание", style=discord.TextStyle.long, max_length=4000, required=True)
+    color = TextInput(label="Цвет (HEX)", max_length=7, required=False, default="#3498db")
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Только админам!", ephemeral=True)
+            return
+        
         try:
-            if not interaction.user.guild_permissions.administrator:
-                await interaction.response.send_message("❌ У вас нет прав администратора!", ephemeral=True)
-                return
-            
-            color_value = discord.Color.random()
-            if self.color.value:
-                try:
-                    color_value = int(self.color.value.replace('#', ''), 16)
-                except:
-                    color_value = discord.Color.random()
-            
-            embed = discord.Embed(
-                title=self.title_input.value or "📢 Объявление",
-                description=self.description.value,
-                color=color_value,
-                timestamp=discord.utils.utcnow()
-            )
-            if self.footer.value:
-                embed.set_footer(text=self.footer.value)
-            embed.set_author(
-                name=f"Отправлено: {interaction.user.display_name}",
-                icon_url=interaction.user.avatar.url if interaction.user.avatar else None
-            )
-            
-            await interaction.channel.send(embed=embed)
-            await interaction.response.send_message("✅ Сообщение отправлено!", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
-
-    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
-        try:
-            await interaction.response.send_message(f"❌ Ошибка: {error}", ephemeral=True)
+            color_value = int(self.color.value.replace('#', ''), 16)
         except:
-            pass
+            color_value = discord.Color.random()
+        
+        embed = discord.Embed(
+            title=self.title_input.value,
+            description=self.description.value,
+            color=color_value,
+            timestamp=discord.utils.utcnow()
+        )
+        embed.set_author(name=f"От: {interaction.user.display_name}")
+        
+        await interaction.channel.send(embed=embed)
+        await interaction.response.send_message("✅ Отправлено!", ephemeral=True)
 
 
-@tree.command(name="say", description="📢 Отправить сообщение от имени бота (только для админов)")
+@tree.command(name="say", description="📢 Отправить от бота (админ)")
 async def say(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ У вас нет прав администратора!", ephemeral=True)
+        await interaction.response.send_message("❌ Только админам!", ephemeral=True)
         return
     await interaction.response.send_modal(EmbedModal())
 
@@ -810,37 +854,29 @@ async def say(interaction: discord.Interaction):
 # ============================================
 class VerifyButton(Button):
     def __init__(self):
-        super().__init__(label="✅ Я не робот", style=discord.ButtonStyle.green, custom_id="verify_button")
+        super().__init__(label="✅ Я не робот", style=discord.ButtonStyle.green)
 
     async def callback(self, interaction: discord.Interaction):
-        user = interaction.user
-        guild = interaction.guild
-        role = guild.get_role(VERIFIED_ROLE_ID)
-        
+        role = interaction.guild.get_role(VERIFIED_ROLE_ID)
         if role:
-            try:
-                await user.add_roles(role)
-                await interaction.response.send_message(
-                    f"{user.mention}, вы успешно прошли верификацию! 🐺⚡\n"
-                    f"Теперь подавайте заявку в VTC: https://hub.truckyapp.com/vtc/warhound-logistics/apply\n\n"
-                    f"💡 Не забудьте установить дату рождения: `/birthday`",
-                    ephemeral=True
-                )
-            except Exception as e:
-                await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
+            await interaction.user.add_roles(role)
+            await interaction.response.send_message(
+                f"{interaction.user.mention}, верификация пройдена! 🐺⚡\n"
+                f"📊 Проверьте свой уровень: `/level`",
+                ephemeral=True
+            )
         else:
-            await interaction.response.send_message("❌ Роль верификации не найдена!", ephemeral=True)
+            await interaction.response.send_message("❌ Роль не найдена!", ephemeral=True)
 
 
-@tree.command(name="verify", description="🔐 Пройти верификацию (подтвердить, что вы не робот)")
+@tree.command(name="verify", description="🔐 Пройти верификацию")
 async def verify(interaction: discord.Interaction):
     view = View()
     view.add_item(VerifyButton())
     
     embed = discord.Embed(
-        title="🔐 Верификация участника",
-        description="Нажмите на кнопку ниже, чтобы подтвердить, что вы реальный человек, а не бот.\n\n"
-                    "После верификации вам откроется доступ к каналам сервера.",
+        title="🔐 Верификация",
+        description="Нажмите кнопку, чтобы подтвердить, что вы не бот.",
         color=discord.Color.green()
     )
     
@@ -848,26 +884,159 @@ async def verify(interaction: discord.Interaction):
 
 
 # ============================================
+# 🎤 ГОЛОСОВЫЕ КАНАЛЫ
+# ============================================
+@bot.event
+async def on_voice_state_update(member, before, after):
+    guild = member.guild
+    
+    # Авто-создание каналов
+    if after.channel and after.channel.id == VOICE_TEMPLATE_CHANNEL_ID:
+        category = guild.get_channel(VOICE_CATEGORY_ID) if VOICE_CATEGORY_ID else None
+        
+        try:
+            new_channel = await guild.create_voice_channel(
+                name=f"🚛 {member.display_name}",
+                category=category
+            )
+            await member.move_to(new_channel)
+            user_channels[member.id] = new_channel.id
+        except Exception as e:
+            print(f"Ошибка: {e}")
+
+    # Удаление пустых каналов
+    if before.channel and before.channel.id in user_channels.values():
+        if len(before.channel.members) == 0:
+            try:
+                await before.channel.delete()
+                user_ids = [uid for uid, cid in user_channels.items() if cid == before.channel.id]
+                for uid in user_ids:
+                    del user_channels[uid]
+            except Exception as e:
+                print(f"Ошибка: {e}")
+    
+    # Отслеживание голосовой активности для XP
+    user_id = str(member.id)
+    now = datetime.now()
+    
+    if after.channel and not before.channel:
+        voice_activity[user_id] = {
+            "start_time": now.timestamp(),
+            "last_activity": now.timestamp(),
+            "is_speaking": not after.self_mute
+        }
+    elif not after.channel and before.channel:
+        if user_id in voice_activity:
+            activity = voice_activity[user_id]
+            minutes = int((now.timestamp() - activity["start_time"]) / 60)
+            
+            if minutes >= 10:
+                xp_earned = (minutes // 10) * XP_PER_10MIN_VOICE
+                add_xp(user_id, xp_earned)
+                
+                levels = load_levels()
+                if user_id not in levels:
+                    levels[user_id] = {"xp": 0, "messages": 0, "voice_minutes": 0, "level": 1}
+                levels[user_id]["voice_minutes"] += minutes
+                save_levels(levels)
+            
+            del voice_activity[user_id]
+    
+    if after.channel and user_id in voice_activity:
+        voice_activity[user_id]["last_activity"] = now.timestamp()
+        voice_activity[user_id]["is_speaking"] = not after.self_mute and not after.self_deaf
+
+
+@bot.command(name="rename")
+async def rename_channel(ctx, *, name: str):
+    if not ctx.author.voice:
+        await ctx.send("❌ Вы должны быть в ГК!", delete_after=5)
+        return
+    channel = ctx.author.voice.channel
+    if channel.id not in user_channels.values():
+        await ctx.send("❌ Не личный канал!", delete_after=5)
+        return
+    owner = next((uid for uid, cid in user_channels.items() if cid == channel.id), None)
+    if owner != ctx.author.id:
+        await ctx.send("❌ Вы не владелец!", delete_after=5)
+        return
+    await channel.edit(name=name)
+    await ctx.send(f"✅ Переименован в **{name}**", delete_after=5)
+
+
+@bot.command(name="limit")
+async def limit_channel(ctx, limit: int):
+    if not ctx.author.voice or ctx.author.voice.channel.id not in user_channels.values():
+        await ctx.send("❌ Вы должны быть в своём канале!", delete_after=5)
+        return
+    await ctx.author.voice.channel.edit(user_limit=limit)
+    await ctx.send(f"✅ Лимит: {limit}", delete_after=5)
+
+
+@bot.command(name="lock")
+async def lock_channel(ctx):
+    if not ctx.author.voice or ctx.author.voice.channel.id not in user_channels.values():
+        await ctx.send("❌ Вы должны быть в своём канале!", delete_after=5)
+        return
+    await ctx.author.voice.channel.set_permission(ctx.guild.default_role, connect=False)
+    await ctx.send("🔒 Закрыт", delete_after=5)
+
+
+@bot.command(name="unlock")
+async def unlock_channel(ctx):
+    if not ctx.author.voice or ctx.author.voice.channel.id not in user_channels.values():
+        await ctx.send("❌ Вы должны быть в своём канале!", delete_after=5)
+        return
+    await ctx.author.voice.channel.set_permission(ctx.guild.default_role, connect=None)
+    await ctx.send("🔓 Открыт", delete_after=5)
+
+
+@bot.command(name="delete")
+async def delete_channel(ctx):
+    if not ctx.author.voice or ctx.author.voice.channel.id not in user_channels.values():
+        await ctx.send("❌ Вы должны быть в своём канале!", delete_after=5)
+        return
+    await ctx.author.voice.channel.delete()
+    await ctx.send("✅ Удалён", delete_after=5)
+
+
+# ============================================
 # 🎲 ДОП. КОМАНДЫ
 # ============================================
-@tree.command(name="ping", description="🏓 Проверка бота")
+@tree.command(name="ping", description="🏓 Проверка")
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message(f"🏓 Pong! {round(bot.latency * 1000)}ms", ephemeral=True)
+
+
+@bot.command(name="help")
+async def help_command(ctx):
+    embed = discord.Embed(title="📚 Команды Warhound Logistics", color=discord.Color.blue())
+    embed.add_field(name="🎖️ Уровни", value="`/level` - Моя карточка\n`/leaderboard` - Топ", inline=False)
+    embed.add_field(name="🔐 Верификация", value="`/verify` - Подтвердить аккаунт", inline=False)
+    embed.add_field(name="🎂 Дни рождения", value="`/birthday` - Установить дату", inline=False)
+    embed.add_field(name="🎫 Поддержка", value="`/ticket` - Создать тикет", inline=False)
+    embed.add_field(name="📅 Рейсы", value="`/schedule` - Рейсы\n`/add_schedule` - Добавить (админ)", inline=False)
+    embed.add_field(name="📸 Конкурсы", value="`/create_contest` - Конкурс (админ)", inline=False)
+    embed.add_field(name="🖥️ Сервер", value="`/server` - Статус сервера", inline=False)
+    embed.add_field(name="🎤 Голосовые", value="`!rename/limit/lock/unlock/delete`", inline=False)
+    
+    await ctx.send(embed=embed, delete_after=60)
 
 
 @bot.event
 async def on_ready():
     print(f'✅ Бот запущен как {bot.user}')
-    print(f'📝 ID бота: {bot.user.id}')
+    print(f'📝 ID: {bot.user.id}')
     
     try:
         synced = await tree.sync()
         print(f'✅ Синхронизировано {len(synced)} команд')
     except Exception as e:
-        print(f'❌ Ошибка синхронизации: {e}')
+        print(f'❌ Ошибка: {e}')
     
     check_birthdays.start()
     check_server_status.start()
+    check_voice_afk.start()
 
 
 @bot.event
@@ -877,61 +1046,26 @@ async def on_member_join(member):
     newbie_role = guild.get_role(NEWBIE_ROLE_ID)
     
     if welcome_channel and newbie_role:
-        try:
-            await member.add_roles(newbie_role)
-            
-            embed = discord.Embed(
-                title="🐺 Добро пожаловать в Warhound Logistics!",
-                description=f"Привет, новый член стаи! ⚡ {member.mention}\n\n"
-                           "Ты вступаешь в компанию дальнобойщиков, где скорость, дисциплина и мощь — закон. "
-                           "Здесь каждый рейс — испытание, а каждая миля — заслуга.",
-                color=discord.Color.dark_gray(),
-                timestamp=discord.utils.utcnow()
-            )
-            embed.add_field(
-                name="📋 Прежде чем выйти на трассу, ознакомься с:",
-                value="📜 **Правила компании:** #📢┃анонсы-компании / #📝┃приказы-стаи\n"
-                      "❓ **FAQ для новичков:** #🆘┃помощь-на-дороге\n"
-                      "🖤 **Ролями и позывными:** Alpha, Wolf Lead, Pack Member — выбери свой статус правильно",
-                inline=False
-            )
-            embed.add_field(
-                name="🚛 Советы новичкам:",
-                value="• Используй свой позывной в никнейме: `[Позывной] | [Имя]`\n"
-                      "• Следи за рейсами в 🛣️┃расписание-рейсов\n"
-                      "• В случае ЧП или поломки сразу пиши в ⚠️┃чп-и-задержки\n"
-                      "• Подключайся к стае и общайся в 🐺┃общий-зал",
-                inline=False
-            )
-            embed.add_field(
-                name="✅ Первые шаги:",
-                value="1. Пройди верификацию: `/verify` (подтверди, что ты не робот 🤖)\n"
-                      "2. Подавай заявку в нашу VTC: https://hub.truckyapp.com/vtc/warhound-logistics/apply\n"
-                      "3. Дождись одобрения менеджеров по найму\n"
-                      "4. Получи роль водителя и выходи на трассу! 🛣️",
-                inline=False
-            )
-            embed.set_footer(text="🔥 Слоган компании: «Беги со стаей» — чувствуй мощь, будь частью стаи и не сдавайся на дороге!")
-            embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
-            
-            await welcome_channel.send(embed=embed)
-        except Exception as e:
-            print(f"Ошибка при приветствии: {e}")
-
-
-@bot.command(name="help")
-async def help_command(ctx):
-    embed = discord.Embed(title="📚 Список команд Warhound Logistics", color=discord.Color.blue())
-    embed.add_field(name="🔐 Верификация", value="`/verify` - Подтвердить аккаунт", inline=False)
-    embed.add_field(name="🎂 Дни рождения", value="`/birthday` - Установить дату\n`/birthdays` - Список всех ДР", inline=False)
-    embed.add_field(name="🎫 Поддержка", value="`/ticket` - Создать обращение к админам", inline=False)
-    embed.add_field(name="📅 Рейсы", value="`/schedule` - Ближайшие рейсы\n`/add_schedule` - Добавить рейс (админ)", inline=False)
-    embed.add_field(name="📸 Конкурсы", value="`/create_contest` - Создать конкурс (админ)\n`/end_contest` - Завершить конкурс (админ)", inline=False)
-    embed.add_field(name="🖥️ Сервер", value="`/server` - Статус игрового сервера", inline=False)
-    embed.add_field(name="📢 Админ", value="`/say` - Отправить embed от бота", inline=False)
-    embed.add_field(name="🎤 Голосовые", value="`!rename/limit/lock/unlock/delete` - Управление личным каналом", inline=False)
-    
-    await ctx.send(embed=embed, delete_after=60)
+        await member.add_roles(newbie_role)
+        
+        embed = discord.Embed(
+            title="🐺 Добро пожаловать в Warhound Logistics!",
+            description=f"Привет, {member.mention}! ⚡\n\nТы вступаешь в компанию дальнобойщиков, где скорость, дисциплина и мощь — закон.",
+            color=discord.Color.dark_gray(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(
+            name="✅ Первые шаги:",
+            value="1. `/verify` - верификация\n"
+                  "2. Заявка: https://hub.truckyapp.com/vtc/warhound-logistics/apply\n"
+                  "3. `/level` - проверить уровень\n"
+                  "4. `/birthday` - установить ДР",
+            inline=False
+        )
+        embed.set_footer(text="🔥 «Беги со стаей»")
+        embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+        
+        await welcome_channel.send(embed=embed)
 
 
 # --- ЗАПУСК ---
@@ -939,6 +1073,6 @@ if __name__ == "__main__":
     try:
         bot.run(TOKEN)
     except discord.LoginFailure:
-        print("❌ Неверный токен! Проверьте токен в файле .env")
+        print("❌ Неверный токен!")
     except Exception as e:
-        print(f"❌ Ошибка запуска: {e}")
+        print(f"❌ Ошибка: {e}")
