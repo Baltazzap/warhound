@@ -20,15 +20,16 @@ bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 tree = bot.tree
 
 # --- НАСТРОЙКИ (ЗАМЕНИТЕ НА СВОИ ID) ---
-WELCOME_CHANNEL_ID = 1477296089882427493  # Канал для приветствий
-APPLY_CHANNEL_ID = 1477340577254211808    # Канал для заявок
-NEWBIE_ROLE_ID = 1477340663342301326      # Роль "Новичок"
-VERIFIED_ROLE_ID = 1477003764576817296    # Роль "Верифицирован"
-VOICE_TEMPLATE_CHANNEL_ID = 1477361557792100363  # Канал "Создать"
-VOICE_CATEGORY_ID = 1477361244729114646          # Категория для голосовых
+WELCOME_CHANNEL_ID = 123456789012345678
+APPLY_CHANNEL_ID = 123456789012345678
+NEWBIE_ROLE_ID = 123456789012345678
+VERIFIED_ROLE_ID = 123456789012345678
+VOICE_TEMPLATE_CHANNEL_ID = 123456789012345678
+VOICE_CATEGORY_ID = 123456789012345678
 
 # Словарь для хранения созданных голосовых каналов
 user_channels = {}
+
 
 # --- СОБЫТИЯ ---
 @bot.event
@@ -36,33 +37,26 @@ async def on_ready():
     print(f'✅ Бот запущен как {bot.user}')
     print(f'📝 ID бота: {bot.user.id}')
     
-    # Синхронизация slash команд
     try:
         synced = await tree.sync()
         print(f'✅ Синхронизировано {len(synced)} команд')
     except Exception as e:
         print(f'❌ Ошибка синхронизации: {e}')
 
+
 @bot.event
 async def on_member_join(member):
-    """Авто-приветствие и выдача роли новичка"""
     guild = member.guild
-    
-    # Находим канал для приветствий
     welcome_channel = guild.get_channel(WELCOME_CHANNEL_ID)
-    
-    # Находим роль новичка
     newbie_role = guild.get_role(NEWBIE_ROLE_ID)
     
     if welcome_channel and newbie_role:
         try:
-            # Выдаем роль новичка
             await member.add_roles(newbie_role)
             
-            # Отправляем приветствие
             embed = discord.Embed(
-                title="Привет, новый член стаи! ⚡",
-                description=f"Привет, {member.mention}!\n\nТы вступаешь в компанию дальнобойщиков, где скорость, дисциплина и мощь — закон.\nЗдесь каждый рейс — испытание, а каждая миля — заслуга.",
+                title="🚗 Добро пожаловать в Транспортную Компанию!",
+                description=f"Привет, {member.mention}!\n\nМы рады видеть тебя в нашем автопарке! 🎉",
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
@@ -70,19 +64,17 @@ async def on_member_join(member):
                 name="📋 Что делать дальше?",
                 value="1. Пройди верификацию: `/verify`\n"
                       "2. Ознакомься с правилами\n"
-                      "3. Подавай заявку в нашем Discord: `/apply`\n"
-                      "4. Подай заявку в нашу VTC - https://hub.truckyapp.com/vtc/warhound-logistics/apply\n",
+                      "3. Подавай заявку: `/apply`\n"
+                      "4. Создай голосовой канал для колонны",
                 inline=False
             )
             embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
             embed.set_footer(text=f"ID: {member.id}")
             
             await welcome_channel.send(embed=embed)
-            
         except Exception as e:
             print(f"Ошибка при приветствии: {e}")
-    else:
-        print("❌ Не найден канал приветствий или роль новичка")
+
 
 # --- ВЕРИФИКАЦИЯ ---
 class VerifyButton(Button):
@@ -102,7 +94,7 @@ class VerifyButton(Button):
             try:
                 await user.add_roles(role)
                 await interaction.response.send_message(
-                    f"{user.mention}, вы успешно прошли верификацию! 🎉\nТеперь вам открыт доступ ко всем каналам.",
+                    f"{user.mention}, вы успешно прошли верификацию! 🎉",
                     ephemeral=True
                 )
             except Exception as e:
@@ -110,26 +102,20 @@ class VerifyButton(Button):
         else:
             await interaction.response.send_message("❌ Роль верификации не найдена!", ephemeral=True)
 
+
 @tree.command(name="verify", description="🔐 Пройти верификацию новичка")
 async def verify(interaction: discord.Interaction):
-    """Команда верификации"""
     view = View()
     view.add_item(VerifyButton())
     
     embed = discord.Embed(
         title="🔐 Система Верификации",
-        description="Нажмите на кнопку ниже, чтобы подтвердить, что вы реальный человек и получить доступ ко всем каналам сервера.",
+        description="Нажмите на кнопку ниже, чтобы подтвердить, что вы реальный человек.",
         color=discord.Color.green()
-    )
-    embed.add_field(
-        name="📌 Правила",
-        value="• Не создавайте альтернативные аккаунты\n"
-              "• Используйте адекватный никнейм\n"
-              "• После верификации ознакомьтесь с правилами",
-        inline=False
     )
     
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
 
 # --- ЗАЯВКА ---
 class ApplicationModal(Modal, title="📝 Заявка в компанию"):
@@ -146,39 +132,31 @@ class ApplicationModal(Modal, title="📝 Заявка в компанию"):
     experience = TextInput(
         label="Опыт работы / Стаж",
         style=discord.TextStyle.long,
-        placeholder="Расскажите о своем опыте вождения (реальный или игровой)",
-        max_length=500
+        placeholder="Расскажите о своем опыте вождения",
+        max_length=1000
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        print(f"📝 Modal получен от: {interaction.user}")
-        print(f"📝 Title: {self.title_input.value}")
-        print(f"📝 Description length: {len(self.description.value)}")
-        print(f"📝 Color: {self.color.value}")
-    
-    try:
-        
         guild = interaction.guild
         channel = guild.get_channel(APPLY_CHANNEL_ID)
         
         if channel:
             embed = discord.Embed(
-                title="📥 Новая заявка в компанию Warhound Logistics!",
+                title="📥 Новая заявка на работу",
                 description=f"Пользователь {interaction.user.mention} подал заявку!",
                 color=discord.Color.gold(),
                 timestamp=discord.utils.utcnow()
             )
-            embed.add_field(name="👤 Пользователь", value=f"{interaction.user.mention} ({interaction.user})", inline=False)
+            embed.add_field(name="👤 Пользователь", value=f"{interaction.user.mention}", inline=False)
             embed.add_field(name="🆔 Никнейм", value=self.nickname.value, inline=True)
             embed.add_field(name="🎂 Возраст", value=self.age.value, inline=True)
             embed.add_field(name="💼 Опыт работы", value=self.experience.value, inline=False)
-            embed.set_thumbnail(url=interaction.user.avatar.url if interaction.user.avatar else interaction.user.default_avatar.url)
             embed.set_footer(text=f"ID: {interaction.user.id}")
             
             try:
                 await channel.send(embed=embed)
                 await interaction.response.send_message(
-                    "✅ Ваша заявка успешно отправлена руководству!\nОжидайте ответа в ЛС или на сервере.",
+                    "✅ Ваша заявка успешно отправлена руководству!",
                     ephemeral=True
                 )
             except Exception as e:
@@ -189,36 +167,30 @@ class ApplicationModal(Modal, title="📝 Заявка в компанию"):
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         await interaction.response.send_message("❌ Произошла ошибка при отправке заявки.", ephemeral=True)
 
+
 @tree.command(name="apply", description="📝 Подать заявку на работу водителем")
 async def apply(interaction: discord.Interaction):
-    """Подать заявку в компанию"""
     await interaction.response.send_modal(ApplicationModal())
+
 
 # --- ГОЛОСОВЫЕ КАНАЛЫ ---
 @bot.event
 async def on_voice_state_update(member, before, after):
-    """Авто-создание голосовых каналов"""
     guild = member.guild
     
-    # Если пользователь зашёл в канал-шаблон
     if after.channel and after.channel.id == VOICE_TEMPLATE_CHANNEL_ID:
         category = guild.get_channel(VOICE_CATEGORY_ID) if VOICE_CATEGORY_ID else None
         
         try:
-            # Создаём новый голосовой канал
             new_channel = await guild.create_voice_channel(
                 name=f"🚛 {member.display_name}",
                 category=category,
                 reason="Авто-создание канала для колонны"
             )
             
-            # Перемещаем пользователя
             await member.move_to(new_channel)
-            
-            # Сохраняем канал
             user_channels[member.id] = new_channel.id
             
-            # Отправляем инструкции
             embed = discord.Embed(
                 title="🎤 Ваш канал создан!",
                 description=f"Канал: {new_channel.mention}",
@@ -237,33 +209,24 @@ async def on_voice_state_update(member, before, after):
                 await member.send(embed=embed)
             except:
                 pass
-                
         except Exception as e:
             print(f"Ошибка создания канала: {e}")
-            try:
-                await member.send("❌ Не удалось создать канал. Обратитесь к администратору.")
-            except:
-                pass
 
-    # Если пользователь покинул свой канал
     if before.channel and before.channel.id in user_channels.values():
         channel = before.channel
         
-        # Проверяем, пуст ли канал
         if len(channel.members) == 0:
             try:
                 await channel.delete(reason="Канал пуст")
-                # Удаляем из словаря
                 user_ids_to_delete = [uid for uid, cid in user_channels.items() if cid == channel.id]
                 for uid in user_ids_to_delete:
                     del user_channels[uid]
             except Exception as e:
                 print(f"Ошибка удаления канала: {e}")
 
-# --- КОМАНДЫ УПРАВЛЕНИЯ КАНАЛОМ ---
+
 @bot.command(name="rename")
 async def rename_channel(ctx, *, name: str):
-    """Переименовать свой голосовой канал"""
     if not ctx.author.voice:
         await ctx.send("❌ Вы должны быть в голосовом канале!", delete_after=5)
         return
@@ -290,9 +253,9 @@ async def rename_channel(ctx, *, name: str):
     except Exception as e:
         await ctx.send(f"❌ Ошибка: {e}", delete_after=5)
 
+
 @bot.command(name="limit")
 async def limit_channel(ctx, limit: int):
-    """Установить лимит в канале"""
     if not ctx.author.voice:
         await ctx.send("❌ Вы должны быть в голосовом канале!", delete_after=5)
         return
@@ -323,9 +286,9 @@ async def limit_channel(ctx, limit: int):
     except Exception as e:
         await ctx.send(f"❌ Ошибка: {e}", delete_after=5)
 
+
 @bot.command(name="lock")
 async def lock_channel(ctx):
-    """Закрыть канал"""
     if not ctx.author.voice:
         await ctx.send("❌ Вы должны быть в голосовом канале!", delete_after=5)
         return
@@ -353,9 +316,9 @@ async def lock_channel(ctx):
     except Exception as e:
         await ctx.send(f"❌ Ошибка: {e}", delete_after=5)
 
+
 @bot.command(name="unlock")
 async def unlock_channel(ctx):
-    """Открыть канал"""
     if not ctx.author.voice:
         await ctx.send("❌ Вы должны быть в голосовом канале!", delete_after=5)
         return
@@ -383,9 +346,9 @@ async def unlock_channel(ctx):
     except Exception as e:
         await ctx.send(f"❌ Ошибка: {e}", delete_after=5)
 
+
 @bot.command(name="delete")
 async def delete_channel(ctx):
-    """Удалить канал"""
     if not ctx.author.voice:
         await ctx.send("❌ Вы должны быть в голосовом канале!", delete_after=5)
         return
@@ -414,26 +377,8 @@ async def delete_channel(ctx):
     except Exception as e:
         await ctx.send(f"❌ Ошибка: {e}", delete_after=5)
 
-@bot.command(name="help")
-async def help_command(ctx):
-    """Справка по командам"""
-    embed = discord.Embed(
-        title="📚 Список команд",
-        description="**Slash команды:**\n"
-                    "`/verify` - Пройти верификацию\n"
-                    "`/apply` - Подать заявку\n\n"
-                    "**Команды префикса:**\n"
-                    "`!rename <название>` - Переименовать канал\n"
-                    "`!limit <число>` - Установить лимит\n"
-                    "`!lock` - Закрыть канал\n"
-                    "`!unlock` - Открыть канал\n"
-                    "`!delete` - Удалить канал\n"
-                    "`!help` - Эта справка",
-        color=discord.Color.blue()
-    )
-    await ctx.send(embed=embed, delete_after=30)
 
-# --- КОМАНДА ОТПРАВКИ СООБЩЕНИЙ ОТ БОТА ---
+# --- SAY COMMAND (ОТПРАВКА EMBED ОТ БОТА) ---
 class EmbedModal(Modal, title="📝 Создать Embed сообщение"):
     title_input = TextInput(
         label="Заголовок",
@@ -451,7 +396,7 @@ class EmbedModal(Modal, title="📝 Создать Embed сообщение"):
     )
     color = TextInput(
         label="Цвет (HEX)",
-        placeholder="#3498db или оставьте пустым",
+        placeholder="#3498db",
         max_length=7,
         required=False,
         default="#3498db"
@@ -465,12 +410,10 @@ class EmbedModal(Modal, title="📝 Создать Embed сообщение"):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            # Проверка прав администратора
             if not interaction.user.guild_permissions.administrator:
                 await interaction.response.send_message("❌ У вас нет прав администратора!", ephemeral=True)
                 return
             
-            # Парсим цвет
             color_value = discord.Color.random()
             if self.color.value:
                 try:
@@ -478,7 +421,6 @@ class EmbedModal(Modal, title="📝 Создать Embed сообщение"):
                 except:
                     color_value = discord.Color.random()
             
-            # Создаём embed
             embed = discord.Embed(
                 title=self.title_input.value or "📢 Объявление",
                 description=self.description.value,
@@ -486,20 +428,15 @@ class EmbedModal(Modal, title="📝 Создать Embed сообщение"):
                 timestamp=discord.utils.utcnow()
             )
             
-            # Добавляем подвал
             if self.footer.value:
                 embed.set_footer(text=self.footer.value)
             
-            # Добавляем автора
             embed.set_author(
                 name=f"Отправлено: {interaction.user.display_name}",
                 icon_url=interaction.user.avatar.url if interaction.user.avatar else None
             )
             
-            # Отправляем в текущий канал
             await interaction.channel.send(embed=embed)
-            
-            # Отвечаем на взаимодействие
             await interaction.response.send_message("✅ Сообщение отправлено!", ephemeral=True)
             
         except Exception as e:
@@ -511,76 +448,43 @@ class EmbedModal(Modal, title="📝 Создать Embed сообщение"):
         except:
             pass
 
+
 @tree.command(name="say", description="📢 Отправить сообщение от имени бота (только для админов)")
 async def say(interaction: discord.Interaction):
-    """Отправить embed сообщение от имени бота"""
-    # Проверка прав
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ У вас нет прав администратора!", ephemeral=True)
         return
     
-    # Отправляем модальное окно
     await interaction.response.send_modal(EmbedModal())
 
-@tree.command(name="embed", description="🎨 Расширенное создание embed (для админов)")
-async def embed_command(interaction: discord.Interaction):
-    """Расширенное создание embed с полями"""
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ У вас нет прав администратора!", ephemeral=True)
-        return
-    
+
+# --- ПИНГ КОМАНДА ---
+@tree.command(name="ping", description="🏓 Проверка бота")
+async def ping(interaction: discord.Interaction):
+    await interaction.response.send_message(f"🏓 Pong! {round(bot.latency * 1000)}ms", ephemeral=True)
+
+
+# --- СПРАВКА ---
+@bot.command(name="help")
+async def help_command(ctx):
     embed = discord.Embed(
-        title="🎨 Конструктор Embed",
-        description="Выберите тип сообщения:",
+        title="📚 Список команд",
+        description="**Slash команды:**\n"
+                    "`/verify` - Пройти верификацию\n"
+                    "`/apply` - Подать заявку\n"
+                    "`/say` - Отправить embed (админ)\n"
+                    "`/ping` - Проверка бота\n\n"
+                    "**Команды префикса:**\n"
+                    "`!rename <название>` - Переименовать канал\n"
+                    "`!limit <число>` - Установить лимит\n"
+                    "`!lock` - Закрыть канал\n"
+                    "`!unlock` - Открыть канал\n"
+                    "`!delete` - Удалить канал\n"
+                    "`!help` - Эта справка",
         color=discord.Color.blue()
     )
-    
-    view = View()
-    
-    # Кнопка для объявления
-    announce_btn = Button(label="📢 Объявление", style=discord.ButtonStyle.blurple)
-    async def announce_callback(interaction: discord.Interaction):
-        modal = EmbedModal()
-        await interaction.response.send_modal(modal)
-    announce_btn.callback = announce_callback
-    view.add_item(announce_btn)
-    
-    # Кнопка для правил
-    rules_btn = Button(label="📋 Правила", style=discord.ButtonStyle.green)
-    async def rules_callback(interaction: discord.Interaction):
-        embed = discord.Embed(
-            title="📋 Правила сервера",
-            description="**1.** Уважайте других участников\n"
-                       "**2.** Запрещён спам и флуд\n"
-                       "**3.** Запрещена реклама\n"
-                       "**4.** Слушайтесь администрацию\n"
-                       "**5.** Запрещены оскорбления",
-            color=discord.Color.green(),
-            timestamp=discord.utils.utcnow()
-        )
-        embed.set_footer(text="Нарушение правил = наказание")
-        await interaction.channel.send(embed=embed)
-        await interaction.response.send_message("✅ Правила отправлены!", ephemeral=True)
-    rules_btn.callback = rules_callback
-    view.add_item(rules_btn)
-    
-    # Кнопка для новостей
-    news_btn = Button(label="📰 Новости", style=discord.ButtonStyle.red)
-    async def news_callback(interaction: discord.Interaction):
-        embed = discord.Embed(
-            title="📰 Новости компании",
-            description="Здесь будет текст новости...",
-            color=discord.Color.red(),
-            timestamp=discord.utils.utcnow()
-        )
-        embed.add_field(name="📅 Дата", value=discord.utils.utcnow().strftime("%d.%m.%Y"), inline=True)
-        embed.add_field(name="👤 Автор", value=interaction.user.mention, inline=True)
-        await interaction.channel.send(embed=embed)
-        await interaction.response.send_message("✅ Новости отправлены!", ephemeral=True)
-    news_btn.callback = news_callback
-    view.add_item(news_btn)
-    
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    await ctx.send(embed=embed, delete_after=30)
+
 
 # --- ЗАПУСК ---
 if __name__ == "__main__":
@@ -590,9 +494,3 @@ if __name__ == "__main__":
         print("❌ Неверный токен! Проверьте токен в файле .env")
     except Exception as e:
         print(f"❌ Ошибка запуска: {e}")
-
-
-
-
-
-
