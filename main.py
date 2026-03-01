@@ -41,7 +41,8 @@ TICKETS_FILE = "tickets.json"
 CONTESTS_FILE = "contests.json"
 LEVELS_FILE = "levels.json"
 VOICE_ACTIVITY_FILE = "voice_activity.json"
-STATUSES_FILE = "statuses.json"  # Новый файл для статусов
+STATUSES_FILE = "statuses.json"
+RADIO_STATIONS_FILE = "radio_stations.json"
 
 # --- НАСТРОЙКИ УРОВНЕЙ ---
 MAX_LEVEL = 150
@@ -83,6 +84,50 @@ def load_statuses():
 def save_statuses(data):
     save_json(STATUSES_FILE, data)
 
+def load_birthdays():
+    return load_json(BIRTHDAYS_FILE)
+
+def save_birthdays(data):
+    save_json(BIRTHDAYS_FILE, data)
+
+def load_schedules():
+    return load_json(SCHEDULES_FILE)
+
+def save_schedules(data):
+    save_json(SCHEDULES_FILE, data)
+
+def load_tickets():
+    return load_json(TICKETS_FILE)
+
+def save_tickets(data):
+    save_json(TICKETS_FILE, data)
+
+def load_contests():
+    return load_json(CONTESTS_FILE)
+
+def save_contests(data):
+    save_json(CONTESTS_FILE, data)
+
+def load_radio_stations():
+    stations = load_json(RADIO_STATIONS_FILE)
+    if not stations:
+        stations = {
+            "1": {"name": "TruckersFM", "url": "https://stream.truckers.fm/truckersfm.mp3", "genre": "Talk/Music"},
+            "2": {"name": "ETS2 Radio", "url": "https://stream.ets2radio.com/radio.mp3", "genre": "Music"},
+            "3": {"name": "Radio Hornet", "url": "https://stream.radiohornet.com/radio", "genre": "Rock"},
+            "4": {"name": "LKW Radio", "url": "https://stream.lkw-radio.de/radio.mp3", "genre": "Pop"},
+            "5": {"name": "Trucker Radio", "url": "https://stream.truckerradio.com/live", "genre": "Country"},
+        }
+        save_json(RADIO_STATIONS_FILE, stations)
+    return stations
+
+def save_radio_stations(data):
+    save_json(RADIO_STATIONS_FILE, data)
+
+
+# ============================================
+# 🎖️ СИСТЕМА УРОВНЕЙ
+# ============================================
 def get_xp_for_level(level):
     return int(level ** 2 * 100)
 
@@ -129,6 +174,13 @@ def add_xp(user_id, amount):
 # ============================================
 # 💬 СТАТУСЫ ПОЛЬЗОВАТЕЛЕЙ
 # ============================================
+def get_user_status(user_id: str) -> str:
+    statuses = load_statuses()
+    if user_id in statuses:
+        return statuses[user_id].get("text", "")
+    return ""
+
+
 class StatusModal(Modal, title="✏️ Установить статус"):
     status_input = TextInput(
         label="Ваш статус",
@@ -163,7 +215,6 @@ class StatusModal(Modal, title="✏️ Установить статус"):
 @app_commands.describe(status_text="Текст статуса (оставьте пустым для удаления)")
 async def status(interaction: discord.Interaction, status_text: str = None):
     if status_text is not None:
-        # Установить статус
         statuses = load_statuses()
         user_id = str(interaction.user.id)
         
@@ -180,20 +231,11 @@ async def status(interaction: discord.Interaction, status_text: str = None):
                 save_statuses(statuses)
             await interaction.response.send_message("✅ Статус удалён!", ephemeral=True)
     else:
-        # Посмотреть статус
         await interaction.response.send_modal(StatusModal())
 
 
-def get_user_status(user_id: str) -> str:
-    """Получить статус пользователя"""
-    statuses = load_statuses()
-    if user_id in statuses:
-        return statuses[user_id].get("text", "")
-    return ""
-
-
 # ============================================
-# 🎖️ КОМАНДЫ УРОВНЕЙ (ФИНАЛЬНАЯ ВЕРСИЯ)
+# 🎖️ КОМАНДЫ УРОВНЕЙ
 # ============================================
 @tree.command(name="level", description="🎖️ Показать свой уровень")
 @app_commands.describe(member="Участник для просмотра (по умолчанию - вы)")
@@ -216,7 +258,6 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
     
     lvl, progress, required, percentage = get_xp_progress(total_xp)
     
-    # Цвет embed по уровню
     if level >= 100:
         color = discord.Color.gold()
     elif level >= 50:
@@ -224,23 +265,17 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
     else:
         color = discord.Color.blue()
     
-    # Получаем статус пользователя
     user_status = get_user_status(user_id)
-    
-    # Аватарка для thumbnail
     avatar_url = target.avatar.url if target.avatar else target.default_avatar.url
     
-    # Создаём embed
     embed = discord.Embed(
         title=f"🎖️ Профиль: {target.display_name}",
         color=color,
         timestamp=discord.utils.utcnow()
     )
     
-    # ✅ МИНИ АВАТАРКА (thumbnail - левый верхний угол)
     embed.set_thumbnail(url=avatar_url)
     
-    # Статус (если есть)
     if user_status:
         embed.add_field(
             name="💬 Статус",
@@ -248,7 +283,6 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
             inline=False
         )
     
-    # Статистика - ГОЛОС И СООБЩЕНИЯ РЯДОМ (inline)
     embed.add_field(
         name="🎤 В голосе",
         value=f"```fix\n{hours}ч {mins}м```",
@@ -261,21 +295,18 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
         inline=True
     )
     
-    # Пустое поле для выравнивания
     embed.add_field(
         name="\u200b",
         value="\u200b",
         inline=True
     )
     
-    # Всего XP - отдельно снизу
     embed.add_field(
         name="⭐ Всего заработано XP",
         value=f"```json\n{total_xp:,}```",
         inline=False
     )
     
-    # Уровень - под XP
     level_emoji = "👑" if level >= MAX_LEVEL else "⭐" if level >= 50 else "🔹"
     embed.add_field(
         name=f"{level_emoji} Уровень",
@@ -283,21 +314,17 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
         inline=True
     )
     
-    # Текущий прогресс до следующего уровня
-    xp_needed = required - progress
     embed.add_field(
         name="📈 До следующего уровня",
         value=f"```json\n{progress:,} / {required:,} XP```",
         inline=True
     )
     
-    # Подвал с аватаркой
     embed.set_footer(
         text=f"ID: {target.id} | Warhound Logistics",
         icon_url=avatar_url
     )
     
-    # ✅ Отправляем с thumbnail (аватарка будет в левом верхнем углу)
     await interaction.followup.send(embed=embed)
 
 
@@ -402,13 +429,11 @@ async def on_message(message):
     user_id = str(message.author.id)
     now = datetime.now().timestamp()
     
-    # Проверка кулдауна
     if user_id in message_cooldowns:
         if now - message_cooldowns[user_id] < MESSAGE_COOLDOWN:
             await bot.process_commands(message)
             return
     
-    # Начисление XP
     levels = load_levels()
     if user_id not in levels:
         levels[user_id] = {"xp": 0, "messages": 0, "voice_minutes": 0, "level": 1}
@@ -420,7 +445,6 @@ async def on_message(message):
     
     message_cooldowns[user_id] = now
     
-    # Проверка повышения уровня
     old_level = levels[user_id]["level"] - 1
     new_level = levels[user_id]["level"]
     
@@ -440,7 +464,6 @@ async def on_voice_state_update(member, before, after):
     now = datetime.now()
     guild = member.guild
     
-    # Авто-создание голосовых каналов
     if after.channel and after.channel.id == VOICE_TEMPLATE_CHANNEL_ID:
         category = guild.get_channel(VOICE_CATEGORY_ID) if VOICE_CATEGORY_ID else None
         
@@ -455,7 +478,6 @@ async def on_voice_state_update(member, before, after):
         except Exception as e:
             print(f"Ошибка создания канала: {e}")
 
-    # Удаление пустых каналов
     if before.channel and before.channel.id in user_channels.values():
         if len(before.channel.members) == 0:
             try:
@@ -466,7 +488,6 @@ async def on_voice_state_update(member, before, after):
             except Exception as e:
                 print(f"Ошибка удаления канала: {e}")
     
-    # Отслеживание голосовой активности для XP
     if after.channel and not before.channel:
         voice_activity[user_id] = {
             "start_time": now.timestamp(),
@@ -511,12 +532,6 @@ async def before_check_voice_afk():
 # ============================================
 # 🎂 ДНИ РОЖДЕНИЯ
 # ============================================
-def load_birthdays():
-    return load_json(BIRTHDAYS_FILE)
-
-def save_birthdays(data):
-    save_json(BIRTHDAYS_FILE, data)
-
 def get_age(birthdate: str) -> int:
     try:
         birth = datetime.strptime(birthdate, "%d.%m.%Y")
@@ -630,13 +645,6 @@ async def before_check_birthdays():
 # ============================================
 # 🎫 ТИКЕТЫ
 # ============================================
-def load_tickets():
-    return load_json(TICKETS_FILE)
-
-def save_tickets(data):
-    save_json(TICKETS_FILE, data)
-
-
 class TicketSelect(Select):
     def __init__(self):
         super().__init__(
@@ -730,13 +738,6 @@ async def add_to_ticket(ctx, member: discord.Member):
 # ============================================
 # 📅 РАСПИСАНИЕ
 # ============================================
-def load_schedules():
-    return load_json(SCHEDULES_FILE)
-
-def save_schedules(data):
-    save_json(SCHEDULES_FILE, data)
-
-
 @tree.command(name="add_schedule", description="📅 Добавить рейс (админ)")
 @app_commands.describe(title="Название", start_time="Время (ДД.ММ ЧЧ:ММ)", route="Маршрут", description="Описание")
 async def add_schedule(interaction: discord.Interaction, title: str, start_time: str, route: str, description: str = ""):
@@ -797,13 +798,6 @@ async def show_schedule(interaction: discord.Interaction):
 # ============================================
 # 📸 ФОТОКОНКУРСЫ
 # ============================================
-def load_contests():
-    return load_json(CONTESTS_FILE)
-
-def save_contests(data):
-    save_json(CONTESTS_FILE, data)
-
-
 @tree.command(name="create_contest", description="📸 Создать конкурс (админ)")
 @app_commands.describe(title="Название", duration_hours="Часов")
 async def create_contest(interaction: discord.Interaction, title: str, duration_hours: int = 24):
@@ -855,39 +849,400 @@ async def end_contest(interaction: discord.Interaction, winner: discord.Member):
 
 
 # ============================================
-# 🖥️ СТАТУС СЕРВЕРА
+# 🖥️ СТАТУС СЕРВЕРОВ TRUCKERSMP
 # ============================================
+@tree.command(name="servers", description="🚛 Статус серверов TruckersMP")
+async def servers(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://api.truckersmp.com/v2/servers", timeout=15) as resp:
+                if resp.status != 200:
+                    await interaction.followup.send("❌ Не удалось получить данные с TruckersMP!", ephemeral=True)
+                    return
+                
+                data = await resp.json()
+    
+    except Exception as e:
+        print(f"❌ Ошибка получения данных: {e}")
+        await interaction.followup.send("❌ Ошибка подключения к TruckersMP!", ephemeral=True)
+        return
+    
+    servers_list = data.get("response", [])
+    
+    if not servers_list:
+        await interaction.followup.send("📭 Нет доступных серверов!", ephemeral=True)
+        return
+    
+    servers_list = sorted(servers_list, key=lambda x: int(x.get("players", 0)), reverse=True)
+    
+    total_players = sum(int(s.get("players", 0)) for s in servers_list)
+    total_servers = len(servers_list)
+    online_servers = sum(1 for s in servers_list if s.get("game") != "offline")
+    
+    embed = discord.Embed(
+        title="🚛 TruckersMP — Статус серверов",
+        description=f"🌐 **Всего серверов:** {total_servers}\n"
+                   f"🟢 **Онлайн:** {online_servers}\n"
+                   f"👥 **Игроков:** {total_players:,}",
+        color=discord.Color.blue(),
+        timestamp=discord.utils.utcnow()
+    )
+    
+    for server in servers_list[:10]:
+        name = server.get("server", "Неизвестно")
+        shortname = server.get("shortname", "")
+        players = int(server.get("players", 0))
+        max_players = int(server.get("maxPlayers", 0))
+        game = server.get("game", "ETS2")
+        
+        status_emoji = "🟢" if players > 0 else "🟡"
+        
+        bar_length = 10
+        if max_players > 0:
+            filled = int(bar_length * (players / max_players))
+        else:
+            filled = 0
+        empty = bar_length - filled
+        progress_bar = "▓" * filled + "░" * empty
+        
+        game_emoji = "🚛" if game == "ets2" else "🚙" if game == "ats" else "🎮"
+        
+        server_name = f"{game_emoji} {name}"
+        if shortname:
+            server_name += f" [{shortname}]"
+        
+        embed.add_field(
+            name=f"{status_emoji} {server_name}",
+            value=f"```[{progress_bar}] {players:,} / {max_players:,}```",
+            inline=True
+        )
+    
+    embed.set_footer(text="Данные обновляются каждые 5 минут | TruckersMP API")
+    embed.set_thumbnail(url="https://truckersmp.com/assets/images/logo.png")
+    
+    view = View()
+    refresh_btn = Button(label="🔄 Обновить", style=discord.ButtonStyle.green)
+    
+    async def refresh_callback(inter: discord.Interaction):
+        await inter.response.defer()
+        await servers(inter)
+    
+    refresh_btn.callback = refresh_callback
+    view.add_item(refresh_btn)
+    
+    await interaction.followup.send(embed=embed, view=view)
+
+
 @tasks.loop(minutes=5)
 async def check_server_status():
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.truckyapp.com/v1/servers?vtc=warhound-logistics", timeout=10) as resp:
+            async with session.get("https://api.truckersmp.com/v2/servers", timeout=10) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    servers = data.get("data", [])
-                    online = sum(1 for s in servers if s.get("players", 0) > 0)
+                    servers = data.get("response", [])
+                    total_players = sum(int(s.get("players", 0)) for s in servers)
                     
-                    if online > 0:
-                        await bot.change_presence(activity=discord.Game(name=f"🚛 Сервер онлайн | {online} игроков"))
+                    if total_players > 0:
+                        await bot.change_presence(
+                            activity=discord.Game(name=f"🚛 TruckersMP | {total_players:,} игроков онлайн")
+                        )
                     else:
-                        await bot.change_presence(activity=discord.Game(name="🌙 Сервер оффлайн"))
+                        await bot.change_presence(activity=discord.Game(name="🌙 Серверы пустуют"))
     except:
         await bot.change_presence(activity=discord.Game(name="🌙 Статус неизвестен"))
 
 
-@tree.command(name="server", description="🖥️ Статус сервера")
+@check_server_status.before_loop
+async def before_check_server_status():
+    await bot.wait_until_ready()
+
+
+@tree.command(name="server", description="🖥️ Быстрый статус TruckersMP")
 async def server_status(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://api.truckersmp.com/v2/servers", timeout=10) as resp:
+                if resp.status != 200:
+                    await interaction.followup.send("❌ Не удалось получить данные!", ephemeral=True)
+                    return
+                
+                data = await resp.json()
+    except:
+        await interaction.followup.send("❌ Ошибка подключения!", ephemeral=True)
+        return
+    
+    servers_list = data.get("response", [])
+    total_players = sum(int(s.get("players", 0)) for s in servers_list)
+    online_servers = sum(1 for s in servers_list if int(s.get("players", 0)) > 0)
+    
+    top_server = max(servers_list, key=lambda x: int(x.get("players", 0))) if servers_list else None
+    
     embed = discord.Embed(
-        title="🖥️ Статус сервера",
-        description="🎮 ETS2 / ATS",
+        title="🖥️ TruckersMP — Быстрый статус",
         color=discord.Color.green(),
         timestamp=discord.utils.utcnow()
     )
-    embed.add_field(name="🌐 IP", value=f"||{ETS2_SERVER_IP}:{ETS2_SERVER_PORT}||", inline=False)
-    embed.add_field(name="👥 Статус", value="🟢 Онлайн", inline=True)
-    embed.set_footer(text="Проверка каждые 5 минут")
+    
+    embed.add_field(name="👥 Игроков онлайн", value=f"**{total_players:,}**", inline=True)
+    embed.add_field(name="🌐 Серверов онлайн", value=f"**{online_servers}**", inline=True)
+    embed.add_field(name="🏆 Самый популярный", value=f"**{top_server.get('server', 'N/A')}**" if top_server else "N/A", inline=True)
+    
+    if top_server and int(top_server.get("players", 0)) > 0:
+        players = int(top_server.get("players", 0))
+        max_players = int(top_server.get("maxPlayers", 0))
+        embed.add_field(
+            name="📊 Заполненность",
+            value=f"```[{players:,} / {max_players:,}]```",
+            inline=False
+        )
+    
+    embed.set_footer(text="Используйте /servers для подробной информации")
+    
+    await interaction.followup.send(embed=embed)
+
+
+# ============================================
+# 📻 РАДИО TRUCKERSMP
+# ============================================
+@tree.command(name="radio", description="📻 Воспроизвести радио из TruckersMP")
+@app_commands.describe(station="Номер или название станции")
+async def radio(interaction: discord.Interaction, station: str = None):
+    await interaction.response.defer()
+    
+    if not interaction.user.voice:
+        await interaction.followup.send("❌ Вы должны быть в голосовом канале!", ephemeral=True)
+        return
+    
+    user_channel = interaction.user.voice.channel
+    stations = load_radio_stations()
+    
+    if station is None:
+        embed = discord.Embed(
+            title="📻 Доступные радиостанции",
+            description="Выберите станцию: `/radio station:1` или по названию",
+            color=discord.Color.blue(),
+            timestamp=discord.utils.utcnow()
+        )
+        
+        for num, data in stations.items():
+            embed.add_field(
+                name=f"🔹 {num}. {data['name']}",
+                value=f"🎵 {data.get('genre', 'Music')}\n🔗 `{data['url'][:50]}...`",
+                inline=False
+            )
+        
+        embed.set_footer(text="Используйте /radio_add чтобы добавить свою станцию")
+        await interaction.followup.send(embed=embed)
+        return
+    
+    selected_station = None
+    station_key = None
+    
+    if station in stations:
+        selected_station = stations[station]
+        station_key = station
+    else:
+        for key, data in stations.items():
+            if station.lower() in data['name'].lower():
+                selected_station = data
+                station_key = key
+                break
+    
+    if not selected_station:
+        await interaction.followup.send(f"❌ Станция \"{station}\" не найдена!\nИспользуйте `/radio` для просмотра списка.", ephemeral=True)
+        return
+    
+    try:
+        voice_client = await user_channel.connect()
+        
+        if voice_client.is_playing():
+            voice_client.stop()
+        
+        ffmpeg_options = {
+            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+            'options': '-vn'
+        }
+        
+        source = discord.FFmpegPCMAudio(selected_station['url'], **ffmpeg_options)
+        voice_client.play(source)
+        
+        embed = discord.Embed(
+            title="📻 Сейчас играет",
+            description=f"**{selected_station['name']}**\n\n🎵 {selected_station.get('genre', 'Music')}",
+            color=discord.Color.green(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="🔊 Канал", value=user_channel.mention, inline=True)
+        embed.add_field(name="👥 Слушателей", value=str(len(user_channel.members)), inline=True)
+        embed.set_footer(text=f"Станция #{station_key} | Для остановки: /radio_stop")
+        
+        view = View()
+        
+        stop_btn = Button(label="⏹️ Стоп", style=discord.ButtonStyle.red)
+        async def stop_callback(inter: discord.Interaction):
+            if inter.guild.voice_client:
+                await inter.guild.voice_client.disconnect()
+                await inter.response.send_message("⏹️ Радио остановлено!", ephemeral=True)
+            else:
+                await inter.response.send_message("❌ Радио не играет!", ephemeral=True)
+        stop_btn.callback = stop_callback
+        view.add_item(stop_btn)
+        
+        await interaction.followup.send(embed=embed, view=view)
+        
+    except Exception as e:
+        print(f"❌ Ошибка воспроизведения: {e}")
+        await interaction.followup.send(f"❌ Ошибка воспроизведения: {e}", ephemeral=True)
+
+
+@tree.command(name="radio_stop", description="⏹️ Остановить радио")
+async def radio_stop(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
+    if interaction.guild.voice_client:
+        await interaction.guild.voice_client.disconnect()
+        await interaction.followup.send("⏹️ Радио остановлено!", ephemeral=True)
+    else:
+        await interaction.followup.send("❌ Радио не играет!", ephemeral=True)
+
+
+@tree.command(name="radio_add", description="➕ Добавить свою радиостанцию (админ)")
+@app_commands.describe(
+    name="Название станции",
+    url="Ссылка на поток (mp3/aac)",
+    genre="Жанр музыки"
+)
+async def radio_add(interaction: discord.Interaction, name: str, url: str, genre: str = "Music"):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Только для администрации!", ephemeral=True)
+        return
+    
+    if not url.startswith(("http://", "https://")):
+        await interaction.response.send_message("❌ URL должен начинаться с http:// или https://", ephemeral=True)
+        return
+    
+    stations = load_radio_stations()
+    new_id = str(len(stations) + 1)
+    
+    stations[new_id] = {
+        "name": name,
+        "url": url,
+        "genre": genre,
+        "added_by": str(interaction.user.id),
+        "added_at": datetime.now().isoformat()
+    }
+    
+    save_radio_stations(stations)
+    
+    embed = discord.Embed(
+        title="➕ Станция добавлена!",
+        description=f"**{name}**\n\n🔗 `{url}`\n🎵 {genre}",
+        color=discord.Color.green()
+    )
+    embed.set_footer(text=f"ID станции: {new_id} | Используйте /radio {new_id} для воспроизведения")
     
     await interaction.response.send_message(embed=embed)
+
+
+@tree.command(name="radio_list", description="📋 Показать все радиостанции")
+async def radio_list(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
+    stations = load_radio_stations()
+    
+    embed = discord.Embed(
+        title="📻 Все радиостанции",
+        description=f"Всего станций: **{len(stations)}**",
+        color=discord.Color.blue(),
+        timestamp=discord.utils.utcnow()
+    )
+    
+    for num, data in stations.items():
+        added_info = ""
+        if "added_by" in data:
+            user = interaction.guild.get_member(int(data["added_by"]))
+            if user:
+                added_info = f"\n➕ Добавил: {user.display_name}"
+        
+        embed.add_field(
+            name=f"🔹 {num}. {data['name']}",
+            value=f"🎵 {data.get('genre', 'Music')}\n🔗 `{data['url'][:40]}...`{added_info}",
+            inline=False
+        )
+    
+    embed.set_footer(text="Используйте /radio <номер> для воспроизведения")
+    
+    await interaction.followup.send(embed=embed)
+
+
+@tree.command(name="radio_remove", description="❌ Удалить радиостанцию (админ)")
+@app_commands.describe(station_id="ID или название станции")
+async def radio_remove(interaction: discord.Interaction, station_id: str):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Только для администрации!", ephemeral=True)
+        return
+    
+    stations = load_radio_stations()
+    
+    if station_id in stations:
+        removed = stations.pop(station_id)
+        save_radio_stations(stations)
+        
+        embed = discord.Embed(
+            title="❌ Станция удалена",
+            description=f"**{removed['name']}**",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed)
+    else:
+        found = False
+        for key, data in stations.items():
+            if station_id.lower() in data['name'].lower():
+                removed = stations.pop(key)
+                save_radio_stations(stations)
+                found = True
+                
+                embed = discord.Embed(
+                    title="❌ Станция удалена",
+                    description=f"**{removed['name']}**",
+                    color=discord.Color.red()
+                )
+                await interaction.response.send_message(embed=embed)
+                break
+        
+        if not found:
+            await interaction.response.send_message(f"❌ Станция \"{station_id}\" не найдена!", ephemeral=True)
+
+
+@tree.command(name="radio_now", description="🎵 Что сейчас играет?")
+async def radio_now(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
+    if not interaction.guild.voice_client or not interaction.guild.voice_client.is_playing():
+        await interaction.followup.send("❌ Сейчас ничего не играет!", ephemeral=True)
+        return
+    
+    voice_channel = interaction.guild.voice_client.channel
+    
+    embed = discord.Embed(
+        title="📻 Сейчас играет",
+        description=f"🔊 **{voice_channel.name}**\n\n👥 Слушателей: {len(voice_channel.members)}",
+        color=discord.Color.green(),
+        timestamp=discord.utils.utcnow()
+    )
+    
+    members_list = ", ".join([m.display_name for m in voice_channel.members[:5]])
+    if len(voice_channel.members) > 5:
+        members_list += f" и ещё {len(voice_channel.members) - 5}..."
+    
+    embed.add_field(name="👥 Слушают", value=members_list, inline=False)
+    
+    await interaction.followup.send(embed=embed)
 
 
 # ============================================
@@ -942,7 +1297,8 @@ class VerifyButton(Button):
             await interaction.response.send_message(
                 f"{interaction.user.mention}, верификация пройдена! 🐺⚡\n"
                 f"📊 Проверьте свой уровень: `/level`\n"
-                f"💬 Установите статус: `/status`",
+                f"💬 Установите статус: `/status`\n"
+                f"📻 Включите радио: `/radio`",
                 ephemeral=True
             )
         else:
@@ -1018,455 +1374,6 @@ async def delete_channel(ctx):
     await ctx.author.voice.channel.delete()
     await ctx.send("✅ Удалён", delete_after=5)
 
-# ============================================
-# 🖥️ СТАТУС СЕРВЕРОВ TRUCKERSMP
-# ============================================
-@tree.command(name="servers", description="🚛 Статус серверов TruckersMP")
-async def servers(interaction: discord.Interaction):
-    await interaction.response.defer()
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get("https://api.truckersmp.com/v2/servers", timeout=15) as resp:
-                if resp.status != 200:
-                    await interaction.followup.send("❌ Не удалось получить данные с TruckersMP!", ephemeral=True)
-                    return
-                
-                data = await resp.json()
-    
-    except Exception as e:
-        print(f"❌ Ошибка получения данных: {e}")
-        await interaction.followup.send("❌ Ошибка подключения к TruckersMP!", ephemeral=True)
-        return
-    
-    # Получаем список серверов
-    servers_list = data.get("response", [])
-    
-    if not servers_list:
-        await interaction.followup.send("📭 Нет доступных серверов!", ephemeral=True)
-        return
-    
-    # Сортировка по количеству игроков
-    servers_list = sorted(servers_list, key=lambda x: int(x.get("players", 0)), reverse=True)
-    
-    # Общий онлайн
-    total_players = sum(int(s.get("players", 0)) for s in servers_list)
-    total_servers = len(servers_list)
-    online_servers = sum(1 for s in servers_list if s.get("game") != "offline")
-    
-    # Создаём embed
-    embed = discord.Embed(
-        title="🚛 TruckersMP — Статус серверов",
-        description=f"🌐 **Всего серверов:** {total_servers}\n"
-                   f"🟢 **Онлайн:** {online_servers}\n"
-                   f"👥 **Игроков:** {total_players:,}",
-        color=discord.Color.blue(),
-        timestamp=discord.utils.utcnow()
-    )
-    
-    # Добавляем каждый сервер
-    for server in servers_list[:10]:  # Показываем топ 10
-        name = server.get("server", "Неизвестно")
-        shortname = server.get("shortname", "")
-        players = int(server.get("players", 0))
-        max_players = int(server.get("maxPlayers", 0))
-        game = server.get("game", "ETS2")
-        
-        # Статус сервера
-        if players > 0:
-            status_emoji = "🟢"
-        else:
-            status_emoji = "🟡"
-        
-        # Прогресс бар заполненности
-        bar_length = 10
-        if max_players > 0:
-            filled = int(bar_length * (players / max_players))
-        else:
-            filled = 0
-        empty = bar_length - filled
-        progress_bar = "▓" * filled + "░" * empty
-        
-        # Игра
-        game_emoji = "🚛" if game == "ets2" else "🚙" if game == "ats" else "🎮"
-        
-        # Форматируем название
-        server_name = f"{game_emoji} {name}"
-        if shortname:
-            server_name += f" [{shortname}]"
-        
-        embed.add_field(
-            name=f"{status_emoji} {server_name}",
-            value=f"```[{progress_bar}] {players:,} / {max_players:,}```",
-            inline=True
-        )
-    
-    # Подвал
-    embed.set_footer(text="Данные обновляются каждые 5 минут | TruckersMP API")
-    embed.set_thumbnail(url="https://truckersmp.com/assets/images/logo.png")
-    
-    # Кнопка для обновления
-    view = View()
-    refresh_btn = Button(label="🔄 Обновить", style=discord.ButtonStyle.green)
-    
-    async def refresh_callback(inter: discord.Interaction):
-        await inter.response.defer()
-        # Рекурсивный вызов команды
-        await servers(inter)
-    
-    refresh_btn.callback = refresh_callback
-    view.add_item(refresh_btn)
-    
-    await interaction.followup.send(embed=embed, view=view)
-
-# ============================================
-# 📻 РАДИО TRUCKERSMP
-# ============================================
-RADIO_STATIONS_FILE = "radio_stations.json"
-
-# Стандартные станции TruckersMP
-DEFAULT_STATIONS = {
-    "1": {"name": "TruckersFM", "url": "https://stream.truckers.fm/truckersfm.mp3", "genre": "Talk/Music"},
-    "2": {"name": "ETS2 Radio", "url": "https://stream.ets2radio.com/radio.mp3", "genre": "Music"},
-    "3": {"name": "Radio Hornet", "url": "https://stream.radiohornet.com/radio", "genre": "Rock"},
-    "4": {"name": "LKW Radio", "url": "https://stream.lkw-radio.de/radio.mp3", "genre": "Pop"},
-    "5": {"name": "Trucker Radio", "url": "https://stream.truckerradio.com/live", "genre": "Country"},
-}
-
-def load_radio_stations():
-    """Загрузить список радиостанций"""
-    stations = load_json(RADIO_STATIONS_FILE)
-    if not stations:
-        stations = DEFAULT_STATIONS.copy()
-        save_json(RADIO_STATIONS_FILE, stations)
-    return stations
-
-def save_radio_stations(data):
-    """Сохранить список радиостанций"""
-    save_json(RADIO_STATIONS_FILE, data)
-
-
-# ============================================
-# 🎵 ВОСПРОИЗВЕДЕНИЕ РАДИО
-# ============================================
-@tree.command(name="radio", description="📻 Воспроизвести радио из TruckersMP")
-@app_commands.describe(station="Номер или название станции")
-async def radio(interaction: discord.Interaction, station: str = None):
-    """Воспроизвести радиостанцию"""
-    await interaction.response.defer()
-    
-    # Проверка: пользователь в голосовом канале
-    if not interaction.user.voice:
-        await interaction.followup.send("❌ Вы должны быть в голосовом канале!", ephemeral=True)
-        return
-    
-    user_channel = interaction.user.voice.channel
-    stations = load_radio_stations()
-    
-    # Если станция не указана — показать список
-    if station is None:
-        embed = discord.Embed(
-            title="📻 Доступные радиостанции",
-            description="Выберите станцию: `/radio station:1` или по названию",
-            color=discord.Color.blue(),
-            timestamp=discord.utils.utcnow()
-        )
-        
-        for num, data in stations.items():
-            embed.add_field(
-                name=f"🔹 {num}. {data['name']}",
-                value=f"🎵 {data.get('genre', 'Music')}\n🔗 `{data['url'][:50]}...`",
-                inline=False
-            )
-        
-        embed.set_footer(text="Используйте /radio_add чтобы добавить свою станцию")
-        await interaction.followup.send(embed=embed)
-        return
-    
-    # Поиск станции по номеру или названию
-    selected_station = None
-    station_key = None
-    
-    # Поиск по номеру
-    if station in stations:
-        selected_station = stations[station]
-        station_key = station
-    else:
-        # Поиск по названию
-        for key, data in stations.items():
-            if station.lower() in data['name'].lower():
-                selected_station = data
-                station_key = key
-                break
-    
-    if not selected_station:
-        await interaction.followup.send(f"❌ Станция \"{station}\" не найдена!\nИспользуйте `/radio` для просмотра списка.", ephemeral=True)
-        return
-    
-    # Подключение к голосовому каналу
-    try:
-        voice_client = await user_channel.connect()
-        
-        # Если уже играет — остановить
-        if voice_client.is_playing():
-            voice_client.stop()
-        
-        # Воспроизведение потока
-        ffmpeg_options = {
-            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'options': '-vn'
-        }
-        
-        source = discord.FFmpegPCMAudio(selected_station['url'], **ffmpeg_options)
-        voice_client.play(source)
-        
-        embed = discord.Embed(
-            title="📻 Сейчас играет",
-            description=f"**{selected_station['name']}**\n\n🎵 {selected_station.get('genre', 'Music')}",
-            color=discord.Color.green(),
-            timestamp=discord.utils.utcnow()
-        )
-        embed.add_field(name="🔊 Канал", value=user_channel.mention, inline=True)
-        embed.add_field(name="👥 Слушателей", value=str(len(user_channel.members)), inline=True)
-        embed.set_footer(text=f"Станция #{station_key} | Для остановки: /radio_stop")
-        
-        # Кнопки управления
-        view = View()
-        
-        stop_btn = Button(label="⏹️ Стоп", style=discord.ButtonStyle.red)
-        async def stop_callback(inter: discord.Interaction):
-            if inter.guild.voice_client:
-                await inter.guild.voice_client.disconnect()
-                await inter.response.send_message("⏹️ Радио остановлено!", ephemeral=True)
-            else:
-                await inter.response.send_message("❌ Радио не играет!", ephemeral=True)
-        stop_btn.callback = stop_callback
-        view.add_item(stop_btn)
-        
-        await interaction.followup.send(embed=embed, view=view)
-        
-    except Exception as e:
-        print(f"❌ Ошибка воспроизведения: {e}")
-        await interaction.followup.send(f"❌ Ошибка воспроизведения: {e}", ephemeral=True)
-
-
-@tree.command(name="radio_stop", description="⏹️ Остановить радио")
-async def radio_stop(interaction: discord.Interaction):
-    """Остановить воспроизведение радио"""
-    await interaction.response.defer()
-    
-    if interaction.guild.voice_client:
-        await interaction.guild.voice_client.disconnect()
-        await interaction.followup.send("⏹️ Радио остановлено!", ephemeral=True)
-    else:
-        await interaction.followup.send("❌ Радио не играет!", ephemeral=True)
-
-
-@tree.command(name="radio_add", description="➕ Добавить свою радиостанцию (админ)")
-@app_commands.describe(
-    name="Название станции",
-    url="Ссылка на поток (mp3/aac)",
-    genre="Жанр музыки"
-)
-async def radio_add(interaction: discord.Interaction, name: str, url: str, genre: str = "Music"):
-    """Добавить пользовательскую радиостанцию"""
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ Только для администрации!", ephemeral=True)
-        return
-    
-    # Проверка URL
-    if not url.startswith(("http://", "https://")):
-        await interaction.response.send_message("❌ URL должен начинаться с http:// или https://", ephemeral=True)
-        return
-    
-    stations = load_radio_stations()
-    new_id = str(len(stations) + 1)
-    
-    stations[new_id] = {
-        "name": name,
-        "url": url,
-        "genre": genre,
-        "added_by": str(interaction.user.id),
-        "added_at": datetime.now().isoformat()
-    }
-    
-    save_radio_stations(stations)
-    
-    embed = discord.Embed(
-        title="➕ Станция добавлена!",
-        description=f"**{name}**\n\n🔗 `{url}`\n🎵 {genre}",
-        color=discord.Color.green()
-    )
-    embed.set_footer(text=f"ID станции: {new_id} | Используйте /radio {new_id} для воспроизведения")
-    
-    await interaction.response.send_message(embed=embed)
-
-
-@tree.command(name="radio_list", description="📋 Показать все радиостанции")
-async def radio_list(interaction: discord.Interaction):
-    """Показать список всех радиостанций"""
-    await interaction.response.defer()
-    
-    stations = load_radio_stations()
-    
-    embed = discord.Embed(
-        title="📻 Все радиостанции",
-        description=f"Всего станций: **{len(stations)}**",
-        color=discord.Color.blue(),
-        timestamp=discord.utils.utcnow()
-    )
-    
-    for num, data in stations.items():
-        added_info = ""
-        if "added_by" in data:
-            user = interaction.guild.get_member(int(data["added_by"]))
-            if user:
-                added_info = f"\n➕ Добавил: {user.display_name}"
-        
-        embed.add_field(
-            name=f"🔹 {num}. {data['name']}",
-            value=f"🎵 {data.get('genre', 'Music')}\n🔗 `{data['url'][:40]}...`{added_info}",
-            inline=False
-        )
-    
-    embed.set_footer(text="Используйте /radio <номер> для воспроизведения")
-    
-    await interaction.followup.send(embed=embed)
-
-
-@tree.command(name="radio_remove", description="❌ Удалить радиостанцию (админ)")
-@app_commands.describe(station_id="ID или название станции")
-async def radio_remove(interaction: discord.Interaction, station_id: str):
-    """Удалить радиостанцию"""
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ Только для администрации!", ephemeral=True)
-        return
-    
-    stations = load_radio_stations()
-    
-    # Поиск станции
-    if station_id in stations:
-        removed = stations.pop(station_id)
-        save_radio_stations(stations)
-        
-        embed = discord.Embed(
-            title="❌ Станция удалена",
-            description=f"**{removed['name']}**",
-            color=discord.Color.red()
-        )
-        await interaction.response.send_message(embed=embed)
-    else:
-        # Поиск по названию
-        found = False
-        for key, data in stations.items():
-            if station_id.lower() in data['name'].lower():
-                removed = stations.pop(key)
-                save_radio_stations(stations)
-                found = True
-                
-                embed = discord.Embed(
-                    title="❌ Станция удалена",
-                    description=f"**{removed['name']}**",
-                    color=discord.Color.red()
-                )
-                await interaction.response.send_message(embed=embed)
-                break
-        
-        if not found:
-            await interaction.response.send_message(f"❌ Станция \"{station_id}\" не найдена!", ephemeral=True)
-
-
-@tree.command(name="radio_now", description="🎵 Что сейчас играет?")
-async def radio_now(interaction: discord.Interaction):
-    """Показать текущую воспроизводимую станцию"""
-    await interaction.response.defer()
-    
-    if not interaction.guild.voice_client or not interaction.guild.voice_client.is_playing():
-        await interaction.followup.send("❌ Сейчас ничего не играет!", ephemeral=True)
-        return
-    
-    voice_channel = interaction.guild.voice_client.channel
-    
-    embed = discord.Embed(
-        title="📻 Сейчас играет",
-        description=f"🔊 **{voice_channel.name}**\n\n👥 Слушателей: {len(voice_channel.members)}",
-        color=discord.Color.green(),
-        timestamp=discord.utils.utcnow()
-    )
-    
-    # Список слушателей
-    members_list = ", ".join([m.display_name for m in voice_channel.members[:5]])
-    if len(voice_channel.members) > 5:
-        members_list += f" и ещё {len(voice_channel.members) - 5}..."
-    
-    embed.add_field(name="👥 Слушают", value=members_list, inline=False)
-    
-    await interaction.followup.send(embed=embed)
-
-# ============================================
-# 🖥️ СТАТУС СЕРВЕРА (ОБНОВЛЁННАЯ)
-# ============================================
-@tasks.loop(minutes=5)
-async def check_server_status():
-    """Фоновая проверка статуса серверов для presence бота"""
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get("https://api.truckersmp.com/v2/servers", timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    servers = data.get("response", [])
-                    total_players = sum(int(s.get("players", 0)) for s in servers)
-                    
-                    if total_players > 0:
-                        await bot.change_presence(
-                            activity=discord.Game(name=f"🚛 TruckersMP | {total_players:,} игроков онлайн")
-                        )
-                    else:
-                        await bot.change_presence(activity=discord.Game(name="🌙 Серверы пустуют"))
-    except:
-        await bot.change_presence(activity=discord.Game(name="🌙 Статус неизвестен"))
-
-
-@check_server_status.before_loop
-async def before_check_server_status():
-    await bot.wait_until_ready()
-
-
-@tree.command(name="server", description="🖥️ Быстрый статус TruckersMP")
-async def server_status(interaction: discord.Interaction):
-    """Быстрый просмотр общего статуса"""
-    await interaction.response.defer()
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get("https://api.truckersmp.com/v2/servers", timeout=10) as resp:
-                if resp.status != 200:
-                    await interaction.followup.send("❌ Не удалось получить данные!", ephemeral=True)
-                    return
-                
-                data = await resp.json()
-    except:
-        await interaction.followup.send("❌ Ошибка подключения!", ephemeral=True)
-        return
-    
-    servers_list = data.get("response", [])
-    total_players = sum(int(s.get("players", 0)) for s in servers_list)
-    online_servers = sum(1 for s in servers_list if int(s.get("players", 0)) > 0)
-    
-    # Топ сервер по игрокам
-    top_server = max(servers_list, key=lambda x: int(x.get("players", 0))) if servers_list else None
-    
-    embed = discord.Embed(
-        title="🖥️ TruckersMP — Быстрый статус",
-        color=discord.Color.green(),
-        timestamp=discord.utils.utcnow()
-    )
-    
-    embed.add_field(name="👥 Игроков онлайн", value=f"**{total_players:,}**", inline=True)
-    embed.add_field(name="🌐 Серверов онлайн", value=f"**{online_servers}**", inline=True)
-    embed.add_field(name="🏆 Самый популярный", value=f"**{top_server.get('server', 'N/A')}**" if top_server else "N/A", inline=True)
-    
-        if top_server and int(top_server.get("players", 
 
 # ============================================
 # 🎲 ДОП. КОМАНДЫ
@@ -1486,7 +1393,8 @@ async def help_command(ctx):
     embed.add_field(name="🎫 Поддержка", value="`/ticket` - Создать тикет", inline=False)
     embed.add_field(name="📅 Рейсы", value="`/schedule` - Рейсы\n`/add_schedule` - Добавить (админ)", inline=False)
     embed.add_field(name="📸 Конкурсы", value="`/create_contest` - Конкурс (админ)\n`/end_contest` - Завершить (админ)", inline=False)
-    embed.add_field(name="🖥️ Сервер", value="`/server` - Статус сервера", inline=False)
+    embed.add_field(name="🖥️ Серверы", value="`/servers` - Статус TruckersMP\n`/server` - Быстрый статус", inline=False)
+    embed.add_field(name="📻 Радио", value="`/radio` - Включить радио\n`/radio_stop` - Остановить\n`/radio_add` - Добавить (админ)", inline=False)
     embed.add_field(name="📢 Админ", value="`/say` - Отправить embed\n`/reset_level` - Сброс уровня", inline=False)
     embed.add_field(name="🎤 Голосовые", value="`!rename/limit/lock/unlock/delete`", inline=False)
     
@@ -1529,7 +1437,8 @@ async def on_member_join(member):
             value="1. `/verify` - верификация\n"
                   "2. Заявка: https://hub.truckyapp.com/vtc/warhound-logistics/apply\n"
                   "3. `/level` - проверить уровень\n"
-                  "4. `/status` - установить статус",
+                  "4. `/status` - установить статус\n"
+                  "5. `/radio` - включить радио",
             inline=False
         )
         embed.set_footer(text="🔥 «Беги со стаей»")
@@ -1546,7 +1455,3 @@ if __name__ == "__main__":
         print("❌ Неверный токен!")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
-
-
-
-
