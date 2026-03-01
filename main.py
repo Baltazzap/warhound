@@ -6,6 +6,8 @@ import asyncio
 import os
 import json
 import aiohttp
+import shutil
+import zipfile
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -49,6 +51,9 @@ MAX_LEVEL = 150
 XP_PER_MESSAGE = 15
 XP_PER_10MIN_VOICE = 100
 MESSAGE_COOLDOWN = 60
+
+# --- FFMPEG НАСТРОЙКИ ---
+FFMPEG_FILE = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
 
 # Словари для отслеживания
 user_channels = {}
@@ -123,6 +128,70 @@ def load_radio_stations():
 
 def save_radio_stations(data):
     save_json(RADIO_STATIONS_FILE, data)
+
+
+# ============================================
+# 📥 АВТОЗАГРУЗКА FFMPEG
+# ============================================
+def download_ffmpeg():
+    """Автоматически скачивает FFmpeg если его нет"""
+    if os.path.exists(FFMPEG_FILE):
+        print(f"✅ FFmpeg найден: {FFMPEG_FILE}")
+        return True, FFMPEG_FILE
+    
+    print("⏳ FFmpeg не найден. Загружаю...")
+    
+    try:
+        import urllib.request
+        
+        if os.name == "nt":
+            ffmpeg_url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+        else:
+            print("⚠️ Для Linux/Mac установите FFmpeg вручную:")
+            print("   Ubuntu: sudo apt-get install ffmpeg")
+            print("   Arch: sudo pacman -S ffmpeg")
+            print("   Mac: brew install ffmpeg")
+            return False, None
+        
+        zip_path = "ffmpeg_temp.zip"
+        print("📥 Загрузка FFmpeg... (это может занять несколько минут)")
+        urllib.request.urlretrieve(ffmpeg_url, zip_path)
+        
+        print("📦 Распаковка...")
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            for file in zip_ref.namelist():
+                if file.endswith('ffmpeg.exe'):
+                    zip_ref.extract(file)
+                    shutil.move(file, FFMPEG_FILE)
+                    extracted_folder = file.split('/')[0]
+                    if os.path.exists(extracted_folder):
+                        shutil.rmtree(extracted_folder)
+                    break
+        
+        os.remove(zip_path)
+        
+        if os.path.exists(FFMPEG_FILE):
+            print(f"✅ FFmpeg успешно загружен: {FFMPEG_FILE}")
+            return True, FFMPEG_FILE
+        else:
+            print("❌ Не удалось извлечь FFmpeg")
+            return False, None
+            
+    except Exception as e:
+        print(f"❌ Ошибка загрузки FFmpeg: {e}")
+        return False, None
+
+
+def check_ffmpeg():
+    """Проверяет наличие FFmpeg"""
+    if os.path.exists(FFMPEG_FILE):
+        return True, FFMPEG_FILE
+    
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path:
+        return True, ffmpeg_path
+    
+    return False, None
 
 
 # ============================================
@@ -1014,6 +1083,31 @@ async def server_status(interaction: discord.Interaction):
 async def radio(interaction: discord.Interaction, station: str = None):
     await interaction.response.defer()
     
+    # ПРОВЕРКА И АВТОЗАГРУЗКА FFMPEG
+    ffmpeg_available, ffmpeg_path = check_ffmpeg()
+    
+    if not ffmpeg_available:
+        ffmpeg_available, ffmpeg_path = download_ffmpeg()
+    
+    if not ffmpeg_available:
+        embed = discord.Embed(
+            title="❌ Ошибка: FFmpeg не найден!",
+            description="**Автоматическая загрузка не удалась.**\n\n"
+                       "**Скачайте вручную:**\n"
+                       "1. Перейдите: https://www.gyan.dev/ffmpeg/builds/\n"
+                       "2. Скачайте: `ffmpeg-release-essentials.zip`\n"
+                       "3. Распакуйте архив\n"
+                       "4. Скопируйте `ffmpeg.exe` из папки `bin` в папку с ботом\n"
+                       "5. Перезапустите бота\n\n"
+                       "**Или через командную строку:**\n"
+                       "```winget install Gyan.FFmpeg```",
+            color=discord.Color.red()
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        return
+    
+    print(f"✅ FFmpeg готов: {ffmpeg_path}")
+    
     if not interaction.user.voice:
         await interaction.followup.send("❌ Вы должны быть в голосовом канале!", ephemeral=True)
         return
@@ -1065,8 +1159,11 @@ async def radio(interaction: discord.Interaction, station: str = None):
         
         ffmpeg_options = {
             'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'options': '-vn'
+            'options': '-vn',
         }
+        
+        if ffmpeg_path == FFMPEG_FILE:
+            ffmpeg_options['executable'] = FFMPEG_FILE
         
         source = discord.FFmpegPCMAudio(selected_station['url'], **ffmpeg_options)
         voice_client.play(source)
@@ -1112,11 +1209,7 @@ async def radio_stop(interaction: discord.Interaction):
 
 
 @tree.command(name="radio_add", description="➕ Добавить свою радиостанцию (админ)")
-@app_commands.describe(
-    name="Название станции",
-    url="Ссылка на поток (mp3/aac)",
-    genre="Жанр музыки"
-)
+@app_commands.describe(name="Название", url="Ссылка на поток", genre="Жанр")
 async def radio_add(interaction: discord.Interaction, name: str, url: str, genre: str = "Music"):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ Только для администрации!", ephemeral=True)
@@ -1144,7 +1237,7 @@ async def radio_add(interaction: discord.Interaction, name: str, url: str, genre
         description=f"**{name}**\n\n🔗 `{url}`\n🎵 {genre}",
         color=discord.Color.green()
     )
-    embed.set_footer(text=f"ID станции: {new_id} | Используйте /radio {new_id} для воспроизведения")
+    embed.set_footer(text=f"ID: {new_id} | /radio {new_id}")
     
     await interaction.response.send_message(embed=embed)
 
@@ -1157,66 +1250,18 @@ async def radio_list(interaction: discord.Interaction):
     
     embed = discord.Embed(
         title="📻 Все радиостанции",
-        description=f"Всего станций: **{len(stations)}**",
-        color=discord.Color.blue(),
-        timestamp=discord.utils.utcnow()
+        description=f"Всего: **{len(stations)}**",
+        color=discord.Color.blue()
     )
     
     for num, data in stations.items():
-        added_info = ""
-        if "added_by" in data:
-            user = interaction.guild.get_member(int(data["added_by"]))
-            if user:
-                added_info = f"\n➕ Добавил: {user.display_name}"
-        
         embed.add_field(
-            name=f"🔹 {num}. {data['name']}",
-            value=f"🎵 {data.get('genre', 'Music')}\n🔗 `{data['url'][:40]}...`{added_info}",
+            name=f"{num}. {data['name']}",
+            value=f"🎵 {data.get('genre', 'Music')}",
             inline=False
         )
     
-    embed.set_footer(text="Используйте /radio <номер> для воспроизведения")
-    
     await interaction.followup.send(embed=embed)
-
-
-@tree.command(name="radio_remove", description="❌ Удалить радиостанцию (админ)")
-@app_commands.describe(station_id="ID или название станции")
-async def radio_remove(interaction: discord.Interaction, station_id: str):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ Только для администрации!", ephemeral=True)
-        return
-    
-    stations = load_radio_stations()
-    
-    if station_id in stations:
-        removed = stations.pop(station_id)
-        save_radio_stations(stations)
-        
-        embed = discord.Embed(
-            title="❌ Станция удалена",
-            description=f"**{removed['name']}**",
-            color=discord.Color.red()
-        )
-        await interaction.response.send_message(embed=embed)
-    else:
-        found = False
-        for key, data in stations.items():
-            if station_id.lower() in data['name'].lower():
-                removed = stations.pop(key)
-                save_radio_stations(stations)
-                found = True
-                
-                embed = discord.Embed(
-                    title="❌ Станция удалена",
-                    description=f"**{removed['name']}**",
-                    color=discord.Color.red()
-                )
-                await interaction.response.send_message(embed=embed)
-                break
-        
-        if not found:
-            await interaction.response.send_message(f"❌ Станция \"{station_id}\" не найдена!", ephemeral=True)
 
 
 @tree.command(name="radio_now", description="🎵 Что сейчас играет?")
@@ -1231,16 +1276,9 @@ async def radio_now(interaction: discord.Interaction):
     
     embed = discord.Embed(
         title="📻 Сейчас играет",
-        description=f"🔊 **{voice_channel.name}**\n\n👥 Слушателей: {len(voice_channel.members)}",
-        color=discord.Color.green(),
-        timestamp=discord.utils.utcnow()
+        description=f"🔊 **{voice_channel.name}**\n👥 {len(voice_channel.members)} слушателей",
+        color=discord.Color.green()
     )
-    
-    members_list = ", ".join([m.display_name for m in voice_channel.members[:5]])
-    if len(voice_channel.members) > 5:
-        members_list += f" и ещё {len(voice_channel.members) - 5}..."
-    
-    embed.add_field(name="👥 Слушают", value=members_list, inline=False)
     
     await interaction.followup.send(embed=embed)
 
@@ -1405,6 +1443,13 @@ async def help_command(ctx):
 async def on_ready():
     print(f'✅ Бот запущен как {bot.user}')
     print(f'📝 ID: {bot.user.id}')
+    
+    # Проверка FFmpeg
+    ffmpeg_available, ffmpeg_path = check_ffmpeg()
+    if ffmpeg_available:
+        print(f'✅ FFmpeg найден: {ffmpeg_path}')
+    else:
+        print('⚠️ FFmpeg НЕ найден! Радио не будет работать до первой команды /radio')
     
     try:
         synced = await tree.sync()
