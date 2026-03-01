@@ -1466,7 +1466,7 @@ async def server_status(interaction: discord.Interaction):
     embed.add_field(name="🌐 Серверов онлайн", value=f"**{online_servers}**", inline=True)
     embed.add_field(name="🏆 Самый популярный", value=f"**{top_server.get('server', 'N/A')}**" if top_server else "N/A", inline=True)
     
-    if top_server and int(top_server.get("players", 
+        if top_server and int(top_server.get("players", 
 
 # ============================================
 # 🎲 ДОП. КОМАНДЫ
@@ -1546,6 +1546,7 @@ if __name__ == "__main__":
         print("❌ Неверный токен!")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
+
 
 
 
