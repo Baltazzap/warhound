@@ -4,7 +4,7 @@ from discord.ext import commands, tasks
 from discord.ui import Button, View, Modal, TextInput, Select
 import asyncio
 import os
-import sqlite3
+import json
 import aiohttp
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -34,16 +34,42 @@ PHOTO_CONTEST_CHANNEL_ID = 1477003982919700553
 ETS2_SERVER_IP = "127.0.0.1"
 ETS2_SERVER_PORT = 27015
 
+# Файл для хранения дней рождения
+BIRTHDAYS_FILE = "birthdays.json"
+
 # Словарь для голосовых каналов
 user_channels = {}
 
 
-# --- БАЗА ДАННЫХ ---
+# --- ФУНКЦИИ ДЛЯ ДНЕЙ РОЖДЕНИЯ (JSON) ---
+def load_birthdays():
+    """Загрузить дни рождения из JSON"""
+    if os.path.exists(BIRTHDAYS_FILE):
+        with open(BIRTHDAYS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_birthdays(data):
+    """Сохранить дни рождения в JSON"""
+    with open(BIRTHDAYS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+def get_age(birthdate: str) -> int:
+    """Вычислить возраст по дате рождения"""
+    try:
+        birth = datetime.strptime(birthdate, "%d.%m.%Y")
+        today = datetime.now()
+        age = today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))
+        return age
+    except:
+        return 0
+
+
+# --- БАЗА ДАННЫХ (для остального) ---
 def init_db():
     conn = sqlite3.connect("warhound.db")
     cursor = conn.cursor()
     
-    # Расписание рейсов
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS schedules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +82,6 @@ def init_db():
         )
     """)
     
-    # Тикеты
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tickets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +92,6 @@ def init_db():
         )
     """)
     
-    # Фотоконкурсы
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS photo_contests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,7 +103,6 @@ def init_db():
         )
     """)
     
-    # Голоса за фото
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS photo_votes (
             contest_id INTEGER,
@@ -113,6 +136,8 @@ async def on_ready():
     except Exception as e:
         print(f'❌ Ошибка синхронизации: {e}')
     
+    # Запуск проверки дней рождения (каждый день в 00:00)
+    check_birthdays.start()
     check_server_status.start()
 
 
@@ -180,7 +205,8 @@ class VerifyButton(Button):
                 await user.add_roles(role)
                 await interaction.response.send_message(
                     f"{user.mention}, вы успешно прошли верификацию! 🐺⚡\n"
-                    f"Теперь подавайте заявку в VTC: https://hub.truckyapp.com/vtc/warhound-logistics/apply",
+                    f"Теперь подавайте заявку в VTC: https://hub.truckyapp.com/vtc/warhound-logistics/apply\n\n"
+                    f"💡 Не забудьте установить дату рождения: `/birthday`",
                     ephemeral=True
                 )
             except Exception as e:
@@ -202,6 +228,185 @@ async def verify(interaction: discord.Interaction):
     )
     
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+# ============================================
+# 🎂 ДНИ РОЖДЕНИЯ (БЕЗ БД)
+# ============================================
+@tree.command(name="birthday", description="🎂 Установить или посмотреть день рождения")
+@app_commands.describe(
+    day="День (1-31)",
+    month="Месяц (1-12)",
+    year="Год (например, 1995)"
+)
+async def birthday(interaction: discord.Interaction, day: int = None, month: int = None, year: int = None):
+    """Установить или посмотреть день рождения"""
+    
+    # Если параметры не указаны — показываем дату пользователя
+    if day is None or month is None:
+        birthdays = load_birthdays()
+        user_id = str(interaction.user.id)
+        
+        if user_id in birthdays:
+            bday = birthdays[user_id]
+            age = get_age(bday) if year else "скрыт"
+            embed = discord.Embed(
+                title="🎂 Ваш день рождения",
+                description=f"📅 **{bday}**\n"
+                           f"🎂 Возраст: **{age}** лет",
+                color=discord.Color.pink()
+            )
+            embed.set_footer(text="Чтобы изменить, используйте /birthday с параметрами")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        else:
+            embed = discord.Embed(
+                title="🎂 День рождения не установлен",
+                description="Укажите дату рождения командой:\n"
+                           "`/birthday day:15 month:6 year:1995`\n\n"
+                           "🎉 В день рождения бот поздравит вас в общем канале!",
+                color=discord.Color.blue()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    # Проверка валидности даты
+    if day < 1 or day > 31:
+        await interaction.response.send_message("❌ День должен быть от 1 до 31!", ephemeral=True)
+        return
+    if month < 1 or month > 12:
+        await interaction.response.send_message("❌ Месяц должен быть от 1 до 12!", ephemeral=True)
+        return
+    if year and (year < 1900 or year > datetime.now().year):
+        await interaction.response.send_message("❌ Неверный год!", ephemeral=True)
+        return
+    
+    # Форматируем дату
+    birthdate = f"{day:02d}.{month:02d}"
+    if year:
+        birthdate += f".{year}"
+    
+    # Сохраняем в JSON
+    birthdays = load_birthdays()
+    birthdays[str(interaction.user.id)] = birthdate
+    save_birthdays(birthdays)
+    
+    embed = discord.Embed(
+        title="🎂 День рождения установлен!",
+        description=f"{interaction.user.mention}, ваш день рождения: **{birthdate}**\n\n"
+                   f"🎉 В этот день бот поздравит вас в общем канале!",
+        color=discord.Color.green()
+    )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@tree.command(name="birthdays", description="📅 Показать все дни рождения участников")
+async def birthdays_list(interaction: discord.Interaction):
+    """Показать все дни рождения"""
+    await interaction.response.defer()
+    
+    birthdays = load_birthdays()
+    guild = interaction.guild
+    
+    if not birthdays:
+        await interaction.followup.send("📭 Пока никто не установил день рождения!", ephemeral=True)
+        return
+    
+    # Сортируем по дате
+    sorted_bdays = sorted(
+        birthdays.items(),
+        key=lambda x: datetime.strptime(x[1][:5], "%d.%m") if len(x[1]) >= 5 else datetime.now()
+    )
+    
+    # Группируем по месяцам
+    months = {
+        1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель",
+        5: "Май", 6: "Июнь", 7: "Июль", 8: "Август",
+        9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"
+    }
+    
+    embed = discord.Embed(
+        title="📅 Дни рождения Warhound Logistics",
+        description="🎉 Поздравляем наших водителей в их праздники!",
+        color=discord.Color.pink(),
+        timestamp=discord.utils.utcnow()
+    )
+    
+    current_month = None
+    bday_list = []
+    
+    for user_id, bdate in sorted_bdays[:20]:  # Показываем топ 20
+        try:
+            day, month = int(bdate[:2]), int(bdate[3:5])
+            user = guild.get_member(int(user_id))
+            name = user.display_name if user else f"Участник#{user_id[-4:]}"
+            
+            month_name = months.get(month, "Неизвестно")
+            
+            if current_month != month_name:
+                if bday_list:
+                    embed.add_field(name=f"📍 {current_month}", value="\n".join(bday_list), inline=False)
+                    bday_list = []
+                current_month = month_name
+            
+            age_text = f" ({get_age(bdate)} лет)" if len(bdate) > 5 else ""
+            bday_list.append(f"• **{name}** — {day}.{month:02d}{age_text}")
+        except:
+            continue
+    
+    if bday_list:
+        embed.add_field(name=f"📍 {current_month}", value="\n".join(bday_list), inline=False)
+    
+    embed.set_footer(text=f"Всего: {len(birthdays)} участников | Чтобы добавить свою дату: /birthday")
+    
+    await interaction.followup.send(embed=embed)
+
+
+@tree.command(name="remove_birthday", description="❌ Удалить свой день рождения")
+async def remove_birthday(interaction: discord.Interaction):
+    """Удалить день рождения"""
+    birthdays = load_birthdays()
+    user_id = str(interaction.user.id)
+    
+    if user_id in birthdays:
+        del birthdays[user_id]
+        save_birthdays(birthdays)
+        await interaction.response.send_message("✅ Ваш день рождения удалён!", ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ У вас не установлен день рождения!", ephemeral=True)
+
+
+@tasks.loop(hours=24)
+async def check_birthdays():
+    """Ежедневная проверка дней рождения (в 00:00)"""
+    now = datetime.now()
+    today = f"{now.day:02d}.{now.month:02d}"
+    
+    birthdays = load_birthdays()
+    
+    # Находим тех, у кого сегодня ДР
+    for user_id, bdate in birthdays.items():
+        if bdate.startswith(today):
+            user = bot.get_user(int(user_id))
+            if user:
+                channel = bot.get_channel(WELCOME_CHANNEL_ID)
+                if channel:
+                    age = get_age(bdate)
+                    await channel.send(
+                        f"🎂🎉 **С ДНЁМ РОЖДЕНИЯ, {user.mention}!** 🎉\n\n"
+                        f"🎁 Желаю ровных дорог, полных прицепов и никаких ДТП!\n"
+                        f"🎂 Возраст: **{age}** лет\n"
+                        f"🐺 **Беги со стаей** и будь счастлив на дорогах! 🚛⚡"
+                    )
+
+
+@check_birthdays.before_loop
+async def before_check_birthdays():
+    """Ждём до полуночи перед первым запуском"""
+    await bot.wait_until_ready()
+    now = datetime.now()
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    await asyncio.sleep((midnight - now).total_seconds())
 
 
 # ============================================
@@ -724,6 +929,7 @@ async def ping(interaction: discord.Interaction):
 async def help_command(ctx):
     embed = discord.Embed(title="📚 Список команд Warhound Logistics", color=discord.Color.blue())
     embed.add_field(name="🔐 Верификация", value="`/verify` - Подтвердить аккаунт", inline=False)
+    embed.add_field(name="🎂 Дни рождения", value="`/birthday` - Установить дату\n`/birthdays` - Список всех ДР", inline=False)
     embed.add_field(name="🎫 Поддержка", value="`/ticket` - Создать обращение к админам", inline=False)
     embed.add_field(name="📅 Рейсы", value="`/schedule` - Ближайшие рейсы\n`/add_schedule` - Добавить рейс (админ)", inline=False)
     embed.add_field(name="📸 Конкурсы", value="`/create_contest` - Создать конкурс (админ)\n`/end_contest` - Завершить конкурс (админ)", inline=False)
