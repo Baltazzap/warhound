@@ -61,8 +61,8 @@ async def on_member_join(member):
             
             # Отправляем приветствие
             embed = discord.Embed(
-                title="🚗 Добро пожаловать в Транспортную Компанию!",
-                description=f"Привет, {member.mention}!\n\nМы рады видеть тебя в нашем автопарке! 🎉",
+                title="Привет, новый член стаи! ⚡",
+                description=f"Привет, {member.mention}!\n\nТы вступаешь в компанию дальнобойщиков, где скорость, дисциплина и мощь — закон. Здесь каждый рейс — испытание, а каждая миля — заслуга.",
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
@@ -70,8 +70,8 @@ async def on_member_join(member):
                 name="📋 Что делать дальше?",
                 value="1. Пройди верификацию: `/verify`\n"
                       "2. Ознакомься с правилами\n"
-                      "3. Подавай заявку: `/apply`\n"
-                      "4. Создай голосовой канал для колонны",
+                      "3. Подавай заявку в нашем Discord: `/apply`\n"
+                      "4. Подай заявку в нашу VTC - https://hub.truckyapp.com/vtc/warhound-logistics",
                 inline=False
             )
             embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
@@ -156,7 +156,7 @@ class ApplicationModal(Modal, title="📝 Заявка в компанию"):
         
         if channel:
             embed = discord.Embed(
-                title="📥 Новая заявка на работу",
+                title="📥 Новая заявка в компанию Warhound Logistics!",
                 description=f"Пользователь {interaction.user.mention} подал заявку!",
                 color=discord.Color.gold(),
                 timestamp=discord.utils.utcnow()
@@ -434,3 +434,4 @@ if __name__ == "__main__":
         print("❌ Неверный токен! Проверьте токен в файле .env")
     except Exception as e:
         print(f"❌ Ошибка запуска: {e}")
+
